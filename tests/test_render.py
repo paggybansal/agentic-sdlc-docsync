@@ -9,10 +9,14 @@ from docsync import __version__
 from docsync.model import NOT_FOUND, SCHEMA_VERSION, ProjectFacts
 from docsync.render import (
     normalise,
+    render,
+    render_dependencies,
     render_generation_info,
     render_hosted,
     render_identity,
+    render_modules,
     render_overview,
+    render_tests,
 )
 
 
@@ -33,11 +37,11 @@ def _facts(**overrides: Any) -> ProjectFacts:
             "license": "MIT",
             "topics": ("alpha", "zeta"),
         },
-        "modules": (),
-        "entry_points": (),
-        "dependencies": (),
-        "optional_dependencies": {},
-        "tests": {},
+        "modules": ("src/demo/a.py", "src/demo/b.py"),
+        "entry_points": ("demo = demo.cli:main",),
+        "dependencies": ("requests>=2",),
+        "optional_dependencies": {"dev": ("pytest", "ruff"), "docs": ("mkdocs",)},
+        "tests": {"test_files": "3", "test_functions": "12"},
         "warnings": (),
     }
     base.update(overrides)
@@ -198,3 +202,190 @@ def test_sections_render_identically_twice() -> None:
 
     # Act / Assert
     assert render_hosted(facts) == render_hosted(facts)
+
+
+_TITLES = [
+    "Project Overview",
+    "Identity & Metadata",
+    "Hosted Repository Metadata",
+    "Modules & Entry Points",
+    "Dependencies",
+    "Test Suite Summary",
+    "Generation Info",
+]
+
+
+def _default_facts() -> ProjectFacts:
+    """What the collectors and github.fetch return for an empty repo (EC-6)."""
+    return ProjectFacts(
+        overview=dict.fromkeys(("name", "description"), NOT_FOUND),
+        identity=dict.fromkeys(("version", "requires_python", "license", "authors"), NOT_FOUND),
+        hosted=dict.fromkeys(
+            ("full_name", "description", "default_branch", "visibility", "license", "topics"),
+            NOT_FOUND,
+        ),
+        modules=(),
+        entry_points=(),
+        dependencies=(),
+        optional_dependencies={},
+        tests=dict.fromkeys(("test_files", "test_functions"), NOT_FOUND),
+        warnings=(),
+    )
+
+
+def test_document_has_seven_sections_in_order() -> None:
+    # Arrange
+    facts = _facts()
+
+    # Act
+    document = render(facts)
+
+    # Assert
+    assert re.findall(r"^## (.+)$", document, flags=re.MULTILINE) == _TITLES
+
+
+def test_render_ends_with_exactly_one_newline() -> None:
+    # Arrange / Act
+    document = render(_facts())
+
+    # Assert
+    assert document.endswith("|\n")
+    assert not document.endswith("\n\n")
+
+
+def test_render_output_contains_no_carriage_return() -> None:
+    # Arrange
+    facts = _facts(overview={"name": "a\r\nb", "description": "c\rd"})
+
+    # Act
+    document = render(facts)
+
+    # Assert
+    assert "\r" not in document
+
+
+def test_render_called_twice_gives_identical_string() -> None:
+    # Arrange
+    facts = _facts()
+
+    # Act / Assert
+    assert render(facts) == render(facts)
+
+
+def test_ec_6_default_facts_render_a_full_seven_section_document() -> None:
+    # Arrange
+    facts = _default_facts()
+
+    # Act
+    document = render(facts)
+
+    # Assert
+    assert re.findall(r"^## (.+)$", document, flags=re.MULTILINE) == _TITLES
+    assert "| Module | Not Found |" in document
+    assert "| Entry Point | Not Found |" in document
+    assert "| Dependency | Not Found |" in document
+    assert "| Optional Dependency | Not Found |" in document
+    assert "| Test Files | Not Found |" in document
+    assert "| Test Functions | Not Found |" in document
+
+
+def test_unresolved_fields_in_default_document_are_all_not_found_except_generation_info() -> None:
+    # Arrange
+    document = render(_default_facts())
+
+    # Act
+    rows = [ln for ln in document.splitlines() if ln.startswith("| ") and "Field |" not in ln]
+    non_default = [r for r in rows if "Not Found" not in r]
+
+    # Assert
+    assert len(non_default) == 2
+    assert all(r.startswith(("| Tool Version", "| Schema Version")) for r in non_default)
+
+
+def test_render_modules_lists_modules_then_entry_points() -> None:
+    # Arrange
+    facts = _facts()
+
+    # Act
+    text = render_modules(facts)
+
+    # Assert
+    assert text.splitlines()[0] == "## Modules & Entry Points"
+    assert text.splitlines()[4:] == [
+        "| Module | src/demo/a.py |",
+        "| Module | src/demo/b.py |",
+        "| Entry Point | demo = demo.cli:main |",
+    ]
+
+
+def test_render_modules_empty_collections_render_not_found() -> None:
+    # Arrange
+    facts = _facts(modules=(), entry_points=())
+
+    # Act
+    text = render_modules(facts)
+
+    # Assert
+    assert text.splitlines()[4:] == ["| Module | Not Found |", "| Entry Point | Not Found |"]
+
+
+def test_render_modules_pipe_in_path_cannot_break_table() -> None:
+    # Arrange
+    facts = _facts(modules=("src/a|b.py",), entry_points=())
+
+    # Act
+    text = render_modules(facts)
+
+    # Assert
+    assert "| Module | src/a\\|b.py |" in text
+
+
+def test_render_dependencies_lists_runtime_then_optional_groups() -> None:
+    # Arrange
+    facts = _facts()
+
+    # Act
+    text = render_dependencies(facts)
+
+    # Assert
+    assert text.splitlines()[0] == "## Dependencies"
+    assert text.splitlines()[4:] == [
+        "| Dependency | requests>=2 |",
+        "| Optional (dev) | pytest |",
+        "| Optional (dev) | ruff |",
+        "| Optional (docs) | mkdocs |",
+    ]
+
+
+def test_render_dependencies_empty_group_renders_not_found() -> None:
+    # Arrange
+    facts = _facts(dependencies=(), optional_dependencies={"dev": ()})
+
+    # Act
+    text = render_dependencies(facts)
+
+    # Assert
+    assert text.splitlines()[4:] == ["| Dependency | Not Found |", "| Optional (dev) | Not Found |"]
+
+
+def test_render_tests_shows_static_counts() -> None:
+    # Arrange
+    facts = _facts()
+
+    # Act
+    text = render_tests(facts)
+
+    # Assert
+    assert text.splitlines()[0] == "## Test Suite Summary"
+    assert text.splitlines()[4:] == ["| Test Files | 3 |", "| Test Functions | 12 |"]
+
+
+def test_render_tests_missing_keys_render_not_found() -> None:
+    # Arrange
+    facts = _facts(tests={})
+
+    # Act
+    text = render_tests(facts)
+
+    # Assert
+    assert text.splitlines()[4:] == ["| Test Files | Not Found |", "| Test Functions | Not Found |"]

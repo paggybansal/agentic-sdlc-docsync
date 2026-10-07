@@ -19,7 +19,7 @@ def normalise(value: FieldValue) -> str:
 
 def _section(title: str, rows: list[tuple[str, FieldValue]]) -> str:
     lines = [f"## {title}", "", "| Field | Value |", "|---|---|"]
-    lines.extend(f"| {label} | {normalise(value)} |" for label, value in rows)
+    lines.extend(f"| {normalise(label)} | {normalise(value)} |" for label, value in rows)
     return "\n".join(lines)
 
 
@@ -62,3 +62,46 @@ def render_generation_info() -> str:
     return _section(
         "Generation Info", [("Tool Version", __version__), ("Schema Version", SCHEMA_VERSION)]
     )
+
+
+def _rows(label: str, items: tuple[str, ...]) -> list[tuple[str, FieldValue]]:
+    return [(label, item) for item in items] or [(label, NOT_FOUND)]
+
+
+def render_modules(facts: ProjectFacts) -> str:
+    """Section 4: Modules & Entry Points."""
+    rows = _rows("Module", facts.modules) + _rows("Entry Point", facts.entry_points)
+    return _section("Modules & Entry Points", rows)
+
+
+def render_dependencies(facts: ProjectFacts) -> str:
+    """Section 5: Dependencies (runtime, then optional groups)."""
+    rows = _rows("Dependency", facts.dependencies)
+    for group, items in facts.optional_dependencies.items():
+        rows += _rows(f"Optional ({group})", items)
+    if not facts.optional_dependencies:
+        rows.append(("Optional Dependency", NOT_FOUND))
+    return _section("Dependencies", rows)
+
+
+def render_tests(facts: ProjectFacts) -> str:
+    """Section 6: Test Suite Summary (static counts; tests are not run)."""
+    rows = [
+        ("Test Files", facts.tests.get("test_files", NOT_FOUND)),
+        ("Test Functions", facts.tests.get("test_functions", NOT_FOUND)),
+    ]
+    return _section("Test Suite Summary", rows)
+
+
+def render(facts: ProjectFacts) -> str:
+    """Render the full document: exactly 7 sections in order, LF, one trailing newline."""
+    sections = [
+        render_overview(facts),
+        render_identity(facts),
+        render_hosted(facts),
+        render_modules(facts),
+        render_dependencies(facts),
+        render_tests(facts),
+        render_generation_info(),
+    ]
+    return "\n\n".join(sections) + "\n"
