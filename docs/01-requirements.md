@@ -71,7 +71,7 @@
 
 | ID | Requirement | Measurable target | Source | Verification |
 |----|-------------|-------------------|--------|--------------|
-| NFR-1 | Offline run time | < 1 second wall-clock (repository size for the measurement: Not Found, see A-3) | Q10 | `tests/test_perf.py::test_offline_under_1s` (planned) |
+| NFR-1 | Offline run time | Target: best of 3 measured in-process offline `generate` runs < 1.0 s wall-clock, after one discarded warm-up run, on the Q16 fixture (50 modules, 20 test files, 30 runtime + 5 optional dependencies, README.md, LICENSE). Test assertion (hard fail): best run < 2.0 s | Q10, Q16 | `tests/test_perf.py::test_offline_under_1s` (marker `perf`) |
 | NFR-2 | Online run time | < 5 seconds, with 5-second HTTP timeout and no retries | Q10 | Mocked-timeout test plus verification step timing |
 | NFR-3 | Test coverage | ≥ 85% line coverage on `src/docsync` | Q11 | `pytest --cov=src/docsync --cov-fail-under=85` |
 | NFR-4 | Edge-case test traceability | 100% of EC-* items have at least one test whose name references the EC ID | Q11 | Review check in step 6 |
@@ -120,6 +120,7 @@
 | Q13 | Supported Python / dependencies? | Python 3.11+; standard library plus `requests`; no new runtime dependency without approval. | NFR-5 |
 | Q14 | "Not Found" exact spelling? | The literal string `Not Found`, not `N/A`, not blank, not `unknown`. | FR-3 |
 | Q15 | Which platforms / project types? | GitHub only; Python projects only; single repository per run. | Scope, EC-14 |
+| Q16 | Which repository does the NFR-1 offline performance measurement use, and how is it measured? (decision RO-1, given at the step 5 T17 gate) | Fixture built in a temporary directory, offline only, no network, no subprocess: 50 Python modules (5 packages x 10 modules, about 10 lines each); 20 test files with 2 test functions each; a `pyproject.toml` declaring 30 runtime dependencies and 5 optional dependencies; a README.md and a LICENSE file. Method: call the generate path in-process (no subprocess, to exclude interpreter startup); one discarded warm-up call; then 3 measured calls with `time.perf_counter`; the best (minimum) duration counts; offline forced explicitly (token unset and `--offline`). Budget: target best run < 1.0 s; the test fails the build only if the best run is >= 2.0 s, so an order-of-magnitude regression is caught without CI jitter causing false failures. The test prints the measured best duration. | NFR-1 |
 
 ## 7. Assumptions
 
@@ -127,7 +128,7 @@
 |----|-----------|--------|
 | A-1 | The exact content of each non-GitHub section (e.g. which `pyproject.toml` keys feed Identity & Metadata, whether Test Suite Summary is derived statically from test files rather than by running tests) was not specified by the human. This is deferred to step 2 (architecture) and must be derived only from repository files. | Open — confirm at step 2 gate |
 | A-2 | Without `--github-repo`, the tool does not try to infer the repository from git remotes; hosted fields are `Not Found`. | Open — not stated by human |
-| A-3 | The repository size used for the NFR-1 performance measurement is not specified. | Not Found |
+| A-3 | The repository size used for the NFR-1 performance measurement was not specified at step 1. | Resolved by the human as decision RO-1: see Q16 and NFR-1 |
 | A-4 | `check` treats a missing committed document as drift (exit 1), since the committed file is not byte-identical to a fresh generation. | Derived from the definition of "in sync" |
 | A-5 | A token being set while `--offline` is passed still results in no network calls; `--offline` wins. | Derived from FR-10 |
 | A-6 | The `check` command uses the same flags (`--offline`, `--github-repo`) as `generate`, so "same configuration" is reproducible. | Derived from Q2 and Q6 |
