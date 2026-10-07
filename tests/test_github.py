@@ -307,3 +307,162 @@ def test_online_failure_makes_no_retry() -> None:
 
     # Assert
     assert len(session.calls) == 1
+
+
+_FULL_PAYLOAD = {
+    "full_name": "octo/demo",
+    "description": "A demo repo.",
+    "default_branch": "main",
+    "visibility": "public",
+    "license": {"key": "mit", "name": "MIT License", "spdx_id": "MIT", "url": "https://x"},
+    "topics": ["zeta", "alpha"],
+    "stargazers_count": 99,
+    "forks_count": 7,
+    "pushed_at": "2026-10-07T00:00:00Z",
+}
+
+
+def _hosted(payload: Any) -> tuple[dict[str, Any], tuple[str, ...]]:
+    (hosted, warnings), _ = _online(FakeResponse(200, payload))
+    return hosted, warnings
+
+
+def test_full_valid_payload_gives_the_six_fields() -> None:
+    # Arrange / Act
+    hosted, warnings = _hosted(_FULL_PAYLOAD)
+
+    # Assert
+    assert hosted == {
+        "full_name": "octo/demo",
+        "description": "A demo repo.",
+        "default_branch": "main",
+        "visibility": "public",
+        "license": "MIT",
+        "topics": ("alpha", "zeta"),
+    }
+    assert warnings == ()
+
+
+def test_only_stable_fields_rendered_extra_api_fields_never_appear() -> None:
+    # Arrange / Act
+    hosted, _ = _hosted(_FULL_PAYLOAD)
+
+    # Assert
+    assert list(hosted) == list(HOSTED_KEYS)
+
+
+def test_topics_are_sorted_by_code_point_and_deduplicated() -> None:
+    # Arrange
+    payload = {**_FULL_PAYLOAD, "topics": ["b", "Z", "a", "b"]}
+
+    # Act
+    hosted, _ = _hosted(payload)
+
+    # Assert
+    assert hosted["topics"] == ("Z", "a", "b")
+
+
+def test_ec_4_license_null_gives_only_license_not_found() -> None:
+    # Arrange
+    payload = {**_FULL_PAYLOAD, "license": None}
+
+    # Act
+    hosted, warnings = _hosted(payload)
+
+    # Assert
+    assert hosted["license"] == NOT_FOUND
+    assert hosted["full_name"] == "octo/demo"
+    assert warnings == ()
+
+
+def test_license_noassertion_gives_not_found() -> None:
+    # Arrange
+    payload = {**_FULL_PAYLOAD, "license": {"spdx_id": "NOASSERTION"}}
+
+    # Act
+    hosted, _ = _hosted(payload)
+
+    # Assert
+    assert hosted["license"] == NOT_FOUND
+
+
+def test_license_object_without_spdx_id_gives_not_found() -> None:
+    # Arrange
+    payload = {**_FULL_PAYLOAD, "license": {"name": "MIT License"}}
+
+    # Act
+    hosted, _ = _hosted(payload)
+
+    # Assert
+    assert hosted["license"] == NOT_FOUND
+
+
+def test_ec_4_empty_object_payload_gives_all_not_found_without_warning() -> None:
+    # Arrange / Act
+    hosted, warnings = _hosted({})
+
+    # Assert
+    assert set(hosted.values()) == {NOT_FOUND}
+    assert list(hosted) == list(HOSTED_KEYS)
+    assert warnings == ()
+
+
+@pytest.mark.parametrize("key", [k for k in HOSTED_KEYS if k != "license"])
+def test_ec_4_single_missing_key_gives_only_that_field_not_found(key: str) -> None:
+    # Arrange
+    payload = {k: v for k, v in _FULL_PAYLOAD.items() if k != key}
+
+    # Act
+    hosted, warnings = _hosted(payload)
+
+    # Assert
+    assert hosted[key] == NOT_FOUND
+    assert [v for k, v in hosted.items() if k != key].count(NOT_FOUND) == 0
+    assert warnings == ()
+
+
+@pytest.mark.parametrize("bad", [None, "", "   ", 5, [], {}, True])
+def test_ec_4_wrong_typed_string_field_gives_not_found_without_warning(bad: Any) -> None:
+    # Arrange
+    payload = {**_FULL_PAYLOAD, "description": bad, "default_branch": bad}
+
+    # Act
+    hosted, warnings = _hosted(payload)
+
+    # Assert
+    assert hosted["description"] == NOT_FOUND
+    assert hosted["default_branch"] == NOT_FOUND
+    assert hosted["visibility"] == "public"
+    assert warnings == ()
+
+
+@pytest.mark.parametrize("bad", [None, [], "alpha", 5, {"a": 1}, [1, None, ""]], ids=repr)
+def test_ec_4_empty_or_wrong_typed_topics_gives_not_found(bad: Any) -> None:
+    # Arrange
+    payload = {**_FULL_PAYLOAD, "topics": bad}
+
+    # Act
+    hosted, warnings = _hosted(payload)
+
+    # Assert
+    assert hosted["topics"] == NOT_FOUND
+    assert warnings == ()
+
+
+def test_topics_ignore_non_string_entries() -> None:
+    # Arrange
+    payload = {**_FULL_PAYLOAD, "topics": ["ok", 3, None]}
+
+    # Act
+    hosted, _ = _hosted(payload)
+
+    # Assert
+    assert hosted["topics"] == ("ok",)
+
+
+def test_valid_payload_makes_exactly_one_call() -> None:
+    # Arrange / Act
+    _, session = _online(FakeResponse(200, _FULL_PAYLOAD))
+
+    # Assert
+    assert len(session.calls) == 1

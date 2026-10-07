@@ -47,8 +47,31 @@ def _get_payload(http: HttpSession, url: str, token: str) -> tuple[dict[str, Any
     return payload, ""
 
 
+def _text(value: object) -> str:
+    return value.strip() if isinstance(value, str) and value.strip() else NOT_FOUND
+
+
+def _license(value: object) -> str:
+    spdx = _text(value.get("spdx_id")) if isinstance(value, dict) else NOT_FOUND
+    return NOT_FOUND if spdx == "NOASSERTION" else spdx
+
+
+def _topics(value: object) -> FieldValue:
+    items = value if isinstance(value, list) else []
+    names = {t.strip() for t in items if isinstance(t, str) and t.strip()}
+    return tuple(sorted(names)) or NOT_FOUND
+
+
 def _extract(payload: dict[str, Any]) -> dict[str, FieldValue]:
-    raise NotImplementedError("field extraction is implemented in task T10")
+    """Pick the six stable fields; each missing or wrongly typed one is ``Not Found``."""
+    return {
+        "full_name": _text(payload.get("full_name")),
+        "description": _text(payload.get("description")),
+        "default_branch": _text(payload.get("default_branch")),
+        "visibility": _text(payload.get("visibility")),
+        "license": _license(payload.get("license")),
+        "topics": _topics(payload.get("topics")),
+    }
 
 
 def fetch(
