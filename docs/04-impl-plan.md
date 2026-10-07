@@ -13,9 +13,9 @@
 
 | Item | Value |
 |---|---|
-| Task count | 19 (T1 to T19); 17 production-code tasks, T18 and T19 are verification tasks |
+| Task count | 20 (T1 to T19 plus T13b, added at the T13 gate); 18 production-code tasks, T18 and T19 are verification tasks |
 | Size rule | Each production task is at most ~40 lines of production code; its tests are part of the same task (Done criteria) |
-| Total estimate | 560 minutes if done sequentially by one implementer; critical path 280 minutes (Section 5) |
+| Total estimate | 580 minutes if done sequentially by one implementer (560 plus 20 for T13b); critical path 280 minutes (Section 5) |
 | Step 5 rule | One task at a time, stop for human approval after each (CLAUDE.md rule 7) |
 
 Build order rationale (matches the mandated order): errors/model/sentinel (T1) -> redactor (T3, T4) and collectors (T5 to T7, T8 to T10) -> renderer (T11, T12) -> CLI (T13 to T15) -> `check` mode (T16, only after `generate` works end to end in T14/T15) -> integration, perf and quality gates (T17 to T19). Redaction is built early because the CLI (T13) echoes user input through it (ADD-1). `.gitattributes` (T2) has no code dependency and satisfies the step 3 condition for ADD-4.
@@ -57,8 +57,9 @@ Assumptions:
 | T11 | `render.py` part 1: normalisation helper (CR/LF to space, whitespace collapse, `\|` escape), section 1 Overview, 2 Identity, 3 Hosted, 7 Generation Info (`__version__`, `SCHEMA_VERSION` only) | `src/docsync/render.py`, `tests/test_render.py` | FR-2, FR-3, FR-5, ADD-3 | T1 | 35 | Fed hand-built `ProjectFacts`; `Not Found` rendered for sentinel; newline/CR/pipe in a description cannot alter structure; Generation Info has no timestamp or hash (`test_generation_info_has_no_volatile_values`); `ruff` clean |
 | T12 | `render.py` part 2: sections 4 Modules & Entry Points, 5 Dependencies, 6 Test Suite Summary; `render(facts)` emits exactly 7 sections in order, LF, exactly one trailing `\n`; empty collections render `Not Found` | `src/docsync/render.py`, `tests/test_render.py` | FR-2, FR-3, FR-13, FR-17, EC-6, ADD-3 | T11 | 35 | `test_document_has_seven_sections_in_order`; `test_unresolved_fields_render_not_found`; all-default facts render a full 7-section document (EC-6); no `\r` in output; render called twice gives identical string |
 | T13 | `cli.py` part 1: argparse with `generate`/`check` subparsers and flags `--repo --out --github-repo --offline --verbose`; `error()` override exits 2; validation of `--repo` (EC-10) and `--github-repo` strict pattern with `.`/`..` rejected (EC-11); `UsageError` messages passed through `redact` | `src/docsync/cli.py`, `tests/test_cli.py` | FR-18, FR-19, EC-10, EC-11, ADD-1, ADD-2 | T1, T4 | 30 | `test_flags_and_defaults`; missing subcommand gives exit 2; non-existent `--repo` and file-as-`--repo` give one-line message, exit 2, no traceback (EC-10); `a`, `a/b/c`, `../x`, `./.`, `o/..` and query characters rejected (EC-11); `--help` works |
+| T13b | `cli.py` part 1b: `--out` safety validation inside `parse_args` (`UsageError`, exit 2, message through `redact`): (i) `--out` must end in `.md`; (ii) the resolved `--out` must lie inside the resolved `--repo`, which is the repository root for this rule. A relative `--out` still resolves against the current working directory (ADD-9) and is then checked against `--repo`. Execution order: after T14 (human decision at the T13 gate that T14 starts first); T15 is blocked by T13b | `src/docsync/cli.py`, `tests/test_cli.py` | FR-18, FR-19, ADD-9 (amended); the `.md` and containment rules were decided by the human at the T13 gate and have no earlier requirement or ADD ID (`Not Found`) | T13 | 20 | Tests: `.md` accepted and `.txt`, no suffix, `.markdown` rejected (case of `.MD` is an implementer default, case-insensitive, to confirm at the gate); `../x.md`, an absolute path outside `--repo`, and a `..` escape after a subdirectory rejected; an absolute path inside `--repo` accepted; the default `docs/PROJECT_DOCS.md` accepted when the cwd is `--repo`; both paths compared after `resolve()`; every rejection is one line, exit 2, no traceback, echoed input only via `redact`; `ruff` clean |
 | T14 | `cli.py` part 2: `generate` orchestration (collect, token from `DOCSYNC_GITHUB_TOKEN` passed on, fetch, build facts, render, `redact(text, secrets=(token,))`, byte-mode write with parent dirs, stdout `wrote <path>`, warnings to stderr, `--verbose` diagnostics redacted, only set/not set logged) | `src/docsync/cli.py`, `tests/test_cli.py` | FR-1, FR-6, FR-8, FR-10, FR-13, FR-20, ADD-1, ADD-9 | T4, T7, T10, T12, T13 | 40 | `test_generate_writes_default_output`; `test_offline_flag_makes_no_requests`; `test_redaction_applied_to_file_and_console` (secret in pyproject description absent from file and capsys); `test_verbose_output_is_redacted`; token value never in stdout/stderr (only set/not set); written bytes are LF, UTF-8, relative `--out` resolved against cwd (ADD-9) |
-| T15 | `cli.py` part 3: top-level handler in `main`: `DocsyncError`, `OSError`, `KeyboardInterrupt`, `BrokenPipeError`, final `except Exception` all map to exit 2 with one-line message and no traceback; add `__main__.py` | `src/docsync/cli.py`, `src/docsync/__main__.py`, `tests/test_cli.py` | FR-19, NFR-9, ADD-6 | T14 | 30 | `test_invalid_input_exit_2_no_traceback`; injected `KeyboardInterrupt` and `BrokenPipeError` each return exit 2 with no traceback in output; write failure at `--out` (for example `--out` is a directory) gives exit 2; generic exception shows type name only under `--verbose`; `python -m docsync --help` runs (output pasted); no bare `except:` |
+| T15 | `cli.py` part 3: top-level handler in `main`: `DocsyncError`, `OSError`, `KeyboardInterrupt`, `BrokenPipeError`, final `except Exception` all map to exit 2 with one-line message and no traceback; add `__main__.py` | `src/docsync/cli.py`, `src/docsync/__main__.py`, `tests/test_cli.py` | FR-19, NFR-9, ADD-6 | T14, T13b | 30 | `test_invalid_input_exit_2_no_traceback`; injected `KeyboardInterrupt` and `BrokenPipeError` each return exit 2 with no traceback in output; write failure at `--out` (for example `--out` is a directory) gives exit 2; generic exception shows type name only under `--verbose`; `python -m docsync --help` runs (output pasted); no bare `except:` |
 | T16 | `cli.py` part 4: `check` mode: regenerate in memory with same config, compare bytes to `--out`, exit 0 identical, 1 drift; only `FileNotFoundError` is drift; other read `OSError` exit 2; never writes; drift hint line | `src/docsync/cli.py`, `tests/test_cli.py` | FR-15, FR-16, EC-12, ADD-6, ADD-10 | T15 | 30 | `test_check_in_sync_and_drift_exit_codes`; `test_ec_12_check_missing_file_is_drift` exit 1; `test_check_read_error_exit_2` (`--out` is a directory) exit 2, not 1 (condition 3); `test_check_does_not_write` (file mtime/bytes and directory listing unchanged); stdout is `drift detected: run "docsync generate" to update <path>` and no diff; no NotImplementedError remains anywhere in src/ (exit condition for step 5: `git grep -n NotImplementedError -- src` returns nothing) |
 | T17 | Integration tests only (no production code): double-run determinism, empty repo end to end, Windows-style/CRLF description input, check after generate, full sections on a realistic fixture | `tests/test_cli.py`, `tests/test_integration.py` | FR-13, FR-17, NFR-8, EC-6, ADD-3 | T16 | 35 | `test_generate_twice_is_byte_identical` (0 differing bytes); `test_empty_repo_produces_full_document`; generate then check returns 0; no absolute paths or `\\` separators in output; failures here that point to production code are fixed in the owning task's files, not by new features |
 | T18 | Fix the NFR-1 perf fixture size and add `test_offline_under_1s` | `tests/test_perf.py` | NFR-1, FR-10 | T16, human decision | 20 | Fixture size recorded in this plan as `Not Found` until the human states it at the T18 gate; the implementer must not choose a number on its own (A-3, DR-12). After the human supplies it: the value is written into Section 7 of this plan and the test uses `time.perf_counter` with assertion `< 1.0` s; measured time pasted |
@@ -89,6 +90,8 @@ flowchart LR
     T10 --> T14
     T12 --> T14
     T13 --> T14
+    T13 --> T13b
+    T13b --> T15
     T14 --> T15
     T15 --> T16
     T16 --> T17
@@ -116,8 +119,9 @@ The graph is acyclic: every edge goes from a lower-numbered task to a higher-num
 | T11 | T1 | T1 approved (model and sentinel) |
 | T12 | T11 | T11 approved (normaliser, sections 1 to 3, 7) |
 | T13 | T1, T4 | T1 and T4 approved (errors, full redaction set) |
+| T13b | T13 | T13 approved (`parse_args` and `CliArgs` exist) |
 | T14 | T4, T7, T10, T12, T13 | All five approved: redactor, collector, GitHub client, renderer, CLI arg layer all present |
-| T15 | T14 | T14 approved (`generate` works end to end) |
+| T15 | T14, T13b | T14 and T13b approved (`generate` works end to end and `--out` is validated) |
 | T16 | T15 | T15 approved (`generate` works and exit-code handler is in place; `check` only after `generate`) |
 | T17 | T16 | T16 approved (both subcommands exist) |
 | T18 | T16, human decision | T16 approved AND the human states the perf fixture size at the gate; until then the value is `Not Found` |
@@ -129,7 +133,7 @@ T1 and T2 have no blockers and can start immediately.
 
 Durations are the Est. column. Path: T1 (25) -> T5 (35) -> T6 (30) -> T7 (35) -> T14 (40) -> T15 (30) -> T16 (30) -> T17 (35) -> T19 (20) = 280 minutes.
 
-Comparison of the parallel branches reaching T14: collector branch 125 min (T1, T5, T6, T7), GitHub branch 115 min (T1, T8, T9, T10), redact+CLI-args branch 115 min (T1, T3, T4, T13), render branch 95 min (T1, T11, T12). The collector branch is longest, so it sets the path. T18 (20 min, after T16) runs in parallel with T17 but must also finish before T19; it can slip beyond this path if the human decision on fixture size is late. Under CLAUDE.md rule 7 the work is serialised one task at a time anyway, so the real elapsed total is the 560-minute sum plus gates.
+Comparison of the parallel branches reaching T14: collector branch 125 min (T1, T5, T6, T7), GitHub branch 115 min (T1, T8, T9, T10), redact+CLI-args branch 115 min (T1, T3, T4, T13), render branch 95 min (T1, T11, T12). The collector branch is longest, so it sets the path. T18 (20 min, after T16) runs in parallel with T17 but must also finish before T19; it can slip beyond this path if the human decision on fixture size is late. Under CLAUDE.md rule 7 the work is serialised one task at a time anyway, so the real elapsed total is the 580-minute sum plus gates.
 
 ## 6. Test Plan Mapping
 
@@ -141,7 +145,7 @@ Comparison of the parallel branches reaching T14: collector branch 125 min (T1, 
 | `tests/test_collect.py` | T5, T6, T7 | EC-6, EC-7, EC-8, EC-13 |
 | `tests/test_github.py` (FakeSession; RequestException subclasses; partial payloads) | T8, T9, T10 | EC-1, EC-2, EC-3, EC-4, EC-5, EC-14 |
 | `tests/test_render.py` | T11, T12 | EC-6 |
-| `tests/test_cli.py` (flags, validation, generate, redaction on file and console, verbose, KeyboardInterrupt/BrokenPipeError exit 2, check exit codes, check read-error exit 2, no-write) | T13, T14, T15, T16 | EC-10, EC-11, EC-12, EC-9 (console), EC-5, EC-14 (end to end offline) |
+| `tests/test_cli.py` (flags, validation, generate, redaction on file and console, verbose, KeyboardInterrupt/BrokenPipeError exit 2, check exit codes, check read-error exit 2, no-write) | T13, T13b, T14, T15, T16 | EC-10, EC-11, EC-12, EC-9 (console), EC-5, EC-14 (end to end offline) |
 | `tests/test_integration.py` | T17 | EC-6, EC-12 |
 | `tests/test_perf.py` | T18 | none (NFR-1; fixture size `Not Found` until fixed) |
 | Command checks (no test file): `ruff check .`, coverage gate, EC naming grep, `git check-attr` | T2, T19 | none |
@@ -162,6 +166,7 @@ Binding condition 3 checklist: each redaction pattern (T4, T3), empty token (T3,
 | Existing `collectors/` stub conflicts with `collect.py` | T5 | If import ambiguity appears, stop and ask the human (PA-2); do not delete files unprompted |
 | Coverage below 85% at T19 | T19 | Add tests in the owning task's test file for the uncovered lines; no coverage-ignore pragmas without approval |
 | Rollback of T14 or later after dependents exist | T14 to T17 | Revert in reverse order (latest first) |
+| With `--repo` as the root for the `--out` check (T13b), the default `docs/PROJECT_DOCS.md` (resolved against the cwd, ADD-9) is rejected when the cwd is not inside `--repo` | T13b, T14, T17 | Reject with a one-line `UsageError`; the user passes `--out` inside `--repo`. This is a behaviour change relative to ADD-9 to be recorded in steps 7 and 8; do not silently re-base the default on `--repo` |
 
 ## 8. Out of Plan
 
