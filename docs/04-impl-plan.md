@@ -25,7 +25,7 @@ Binding step 3 conditions and where they land:
 | Condition | Where |
 |---|---|
 | `.gitattributes` LF entry (ADD-4, DR-3) | T2 |
-| Perf fixture size for NFR-1 is `Not Found` until fixed (A-3, DR-12) | T18: explicit task; value stays `Not Found` until the human states it at the T18 gate |
+| Perf fixture size for NFR-1 (A-3, DR-12) | Resolved by the human as RO-1 (Section 9); implemented in T18 |
 | Tests for each redaction pattern, empty token, RequestException subclasses, partial payloads, `check` read-error exit 2, KeyboardInterrupt/BrokenPipeError exit 2 | T4 (patterns, empty token), T9 (RequestException subclasses), T10 (partial payloads), T15 (interrupt/pipe), T16 (check read error); see Section 6 |
 
 Assumptions:
@@ -35,7 +35,7 @@ Assumptions:
 | PA-1 | `src/docsync/__init__.py` already defines `__version__ = "0.1.0"` and `pyproject.toml` already declares `docsync.cli:main`, `requests>=2.32.0`, pytest/ruff config and coverage config (read from the repository). T1 and T11 reuse them and do not change the version. |
 | PA-2 | A stub `src/docsync/collectors/__init__.py` already exists but the architecture (C-4) specifies a single `collect.py`. The plan builds `collect.py` and leaves the stub untouched; whether to remove it is Not Found (needs human decision, see Section 8). |
 | PA-3 | Document schema version (A-7, OQ-4): T1 defines `SCHEMA_VERSION = "1"` as a plan-level decision, to be confirmed by the human at the step 4 gate. Tool version comes from `docsync.__version__`. |
-| PA-4 | Perf fixture size for NFR-1: `Not Found` until fixed in T18. Not invented here. |
+| PA-4 | Perf fixture size for NFR-1: fixed by the human as decision RO-1 (Section 9); no longer `Not Found`. The implementer must not change it. |
 | PA-5 | Test code is not counted toward the ~40-line production limit; test files are listed in Files touched. |
 | PA-6 | Estimates are planning estimates for one implementer including tests; they are not measured data. |
 | PA-7 | Each EC test name contains its EC id (NFR-4), e.g. `test_ec_2_api_404_degrades`. |
@@ -62,7 +62,7 @@ Assumptions:
 | T15 | `cli.py` part 3: top-level handler in `main`: `DocsyncError`, `OSError`, `KeyboardInterrupt`, `BrokenPipeError`, final `except Exception` all map to exit 2 with one-line message and no traceback; add `__main__.py` | `src/docsync/cli.py`, `src/docsync/__main__.py`, `tests/test_cli.py` | FR-19, NFR-9, ADD-6 | T14, T13b | 30 | `test_invalid_input_exit_2_no_traceback`; injected `KeyboardInterrupt` and `BrokenPipeError` each return exit 2 with no traceback in output; write failure at `--out` (for example `--out` is a directory) gives exit 2; generic exception shows type name only under `--verbose`; `python -m docsync --help` runs (output pasted); no bare `except:` |
 | T16 | `cli.py` part 4: `check` mode: regenerate in memory with same config, compare bytes to `--out`, exit 0 identical, 1 drift; only `FileNotFoundError` is drift; other read `OSError` exit 2; never writes; drift hint line | `src/docsync/cli.py`, `tests/test_cli.py` | FR-15, FR-16, EC-12, ADD-6, ADD-10 | T15 | 30 | `test_check_in_sync_and_drift_exit_codes`; `test_ec_12_check_missing_file_is_drift` exit 1; `test_check_read_error_exit_2` (`--out` is a directory) exit 2, not 1 (condition 3); `test_check_does_not_write` (file mtime/bytes and directory listing unchanged); stdout is `drift detected: run "docsync generate" to update <path>` and no diff; no NotImplementedError remains anywhere in src/ (exit condition for step 5: `git grep -n NotImplementedError -- src` returns nothing) |
 | T17 | Integration tests only (no production code): double-run determinism, empty repo end to end, Windows-style/CRLF description input, check after generate, full sections on a realistic fixture | `tests/test_cli.py`, `tests/test_integration.py` | FR-13, FR-17, NFR-8, EC-6, ADD-3 | T16 | 35 | `test_generate_twice_is_byte_identical` (0 differing bytes); `test_empty_repo_produces_full_document`; generate then check returns 0; no absolute paths or `\\` separators in output; failures here that point to production code are fixed in the owning task's files, not by new features |
-| T18 | Fix the NFR-1 perf fixture size and add `test_offline_under_1s` | `tests/test_perf.py` | NFR-1, FR-10 | T16, human decision | 20 | Fixture size recorded in this plan as `Not Found` until the human states it at the T18 gate; the implementer must not choose a number on its own (A-3, DR-12). After the human supplies it: the value is written into Section 7 of this plan and the test uses `time.perf_counter` with assertion `< 1.0` s; measured time pasted |
+| T18 | Add `test_offline_under_1s` to the RO-1 specification (Section 9) and register the `perf` pytest marker | `tests/test_perf.py`, `pyproject.toml` (marker registration only; added at the T17 gate) | NFR-1, FR-10 | T16 | 20 | Fixture and method exactly as RO-1; `@pytest.mark.perf` registered in `[tool.pytest.ini_options] markers`; in-process generate, one discarded warm-up, 3 measured runs, best (minimum) by `time.perf_counter`; offline forced (token unset and `--offline`); no network and no subprocess; asserts best run < 2.0 s and prints the measured best duration against the 1.0 s target; `ruff check .` clean; full suite green |
 | T19 | Quality gates and verification inputs: run `ruff check .`, `pytest -q`, `pytest --cov=src/docsync --cov-fail-under=85`, confirm NFR-4 EC-to-test naming and NFR-5 dependencies | none (fixes land in owning task files) | NFR-3, NFR-4, NFR-5, NFR-6, NFR-7, NFR-9 | T2, T17, T18 | 20 | Pasted command output: ruff 0 findings; all tests pass; coverage >= 85%; every EC-1..EC-14 has at least one test name containing its id (grep output pasted); `pyproject.toml` runtime dependencies are only `requests`; exit codes only 0/1/2 asserted by tests |
 
 Requirement coverage check. FR-1 T14; FR-2 T11, T12; FR-3 T1, T5, T6, T7, T10, T11, T12; FR-4 T10; FR-5 T11; FR-6 T3, T4, T14; FR-7 T5, T7; FR-8 T9, T14; FR-9 T8; FR-10 T8, T14; FR-11 T9; FR-12 T9; FR-13 T1, T7, T12, T14, T17; FR-14 T5; FR-15 T16; FR-16 T16; FR-17 T2, T12, T17; FR-18 T13; FR-19 T1, T13, T15; FR-20 T4, T14. EC-1 T9; EC-2 T9; EC-3 T9; EC-4 T9, T10; EC-5 T8; EC-6 T6, T7, T12, T17; EC-7 T5; EC-8 T5, T6, T7; EC-9 T3, T4; EC-10 T13; EC-11 T13; EC-12 T16; EC-13 T5; EC-14 T8. Unmapped FR/EC: none.
@@ -96,13 +96,12 @@ flowchart LR
     T15 --> T16
     T16 --> T17
     T16 --> T18
-    H[Human: perf fixture size] --> T18
     T2 --> T19
     T17 --> T19
     T18 --> T19
 ```
 
-The graph is acyclic: every edge goes from a lower-numbered task to a higher-numbered one (the human decision node H is an external input, not a task).
+The graph is acyclic: every edge goes from a lower-numbered task to a higher-numbered one (the perf fixture decision RO-1 is recorded in Section 9 and is no longer a node).
 
 ## 4. Blocked Tasks
 
@@ -124,7 +123,7 @@ The graph is acyclic: every edge goes from a lower-numbered task to a higher-num
 | T15 | T14, T13b | T14 and T13b approved (`generate` works end to end and `--out` is validated) |
 | T16 | T15 | T15 approved (`generate` works and exit-code handler is in place; `check` only after `generate`) |
 | T17 | T16 | T16 approved (both subcommands exist) |
-| T18 | T16, human decision | T16 approved AND the human states the perf fixture size at the gate; until then the value is `Not Found` |
+| T18 | T16 | T16 approved (the fixture size was supplied as RO-1) |
 | T19 | T2, T17, T18 | `.gitattributes` in place, integration tests pass, perf test exists |
 
 T1 and T2 have no blockers and can start immediately.
@@ -133,7 +132,7 @@ T1 and T2 have no blockers and can start immediately.
 
 Durations are the Est. column. Path: T1 (25) -> T5 (35) -> T6 (30) -> T7 (35) -> T14 (40) -> T15 (30) -> T16 (30) -> T17 (35) -> T19 (20) = 280 minutes.
 
-Comparison of the parallel branches reaching T14: collector branch 125 min (T1, T5, T6, T7), GitHub branch 115 min (T1, T8, T9, T10), redact+CLI-args branch 115 min (T1, T3, T4, T13), render branch 95 min (T1, T11, T12). The collector branch is longest, so it sets the path. T18 (20 min, after T16) runs in parallel with T17 but must also finish before T19; it can slip beyond this path if the human decision on fixture size is late. Under CLAUDE.md rule 7 the work is serialised one task at a time anyway, so the real elapsed total is the 580-minute sum plus gates.
+Comparison of the parallel branches reaching T14: collector branch 125 min (T1, T5, T6, T7), GitHub branch 115 min (T1, T8, T9, T10), redact+CLI-args branch 115 min (T1, T3, T4, T13), render branch 95 min (T1, T11, T12). The collector branch is longest, so it sets the path. T18 (20 min, after T16) runs in parallel with T17 but must also finish before T19; it is off the critical path. Under CLAUDE.md rule 7 the work is serialised one task at a time anyway, so the real elapsed total is the 580-minute sum plus gates.
 
 ## 6. Test Plan Mapping
 
@@ -147,7 +146,7 @@ Comparison of the parallel branches reaching T14: collector branch 125 min (T1, 
 | `tests/test_render.py` | T11, T12 | EC-6 |
 | `tests/test_cli.py` (flags, validation, generate, redaction on file and console, verbose, KeyboardInterrupt/BrokenPipeError exit 2, check exit codes, check read-error exit 2, no-write) | T13, T13b, T14, T15, T16 | EC-10, EC-11, EC-12, EC-9 (console), EC-5, EC-14 (end to end offline) |
 | `tests/test_integration.py` | T17 | EC-6, EC-12 |
-| `tests/test_perf.py` | T18 | none (NFR-1; fixture size `Not Found` until fixed) |
+| `tests/test_perf.py` | T18 | none (NFR-1; fixture per RO-1) |
 | Command checks (no test file): `ruff check .`, coverage gate, EC naming grep, `git check-attr` | T2, T19 | none |
 
 Binding condition 3 checklist: each redaction pattern (T4, T3), empty token (T3, T8), RequestException subclasses (T9), partial JSON payloads (T10), `check` read-error exit 2 (T16), KeyboardInterrupt/BrokenPipeError exit 2 (T15).
@@ -162,7 +161,7 @@ Binding condition 3 checklist: each redaction pattern (T4, T3), empty token (T3,
 | `requests` behaviour differs from the fake session | T9 | Keep the fake aligned with `requests.Response` attributes actually used (`status_code`, `json()`); no real network calls to compare (NFR-7) |
 | Per-phase timeout can exceed 5 s wall clock (DR-5) | T9, T19 | Not fixed by design (FR-12 mandates the value); report measured online timing in step 7 |
 | False drift from CRLF on Windows | T2, T16, T17 | If T2 does not give `eol: lf`, stop and report; do not weaken the byte-compare |
-| Perf fixture size not provided | T18 | T18 stays blocked and the value stays `Not Found`; T19 may be run with T18 reported as open, never with an invented number |
+| Wall-clock perf test is flaky on a loaded machine | T18 | The hard threshold is 2.0 s (twice the 1.0 s target) on the best of 3 runs after a warm-up. If it still fails, investigate; do not raise the threshold without human approval. A miss of the 1.0 s target alone is reported, not failed |
 | Existing `collectors/` stub conflicts with `collect.py` | T5 | If import ambiguity appears, stop and ask the human (PA-2); do not delete files unprompted |
 | Coverage below 85% at T19 | T19 | Add tests in the owning task's test file for the uncovered lines; no coverage-ignore pragmas without approval |
 | Rollback of T14 or later after dependents exist | T14 to T17 | Revert in reverse order (latest first) |
@@ -172,7 +171,7 @@ Binding condition 3 checklist: each redaction pattern (T4, T3), empty token (T3,
 
 | Excluded item | Reason |
 |---|---|
-| Choosing the NFR-1 fixture size | Not derivable (A-3, DR-12); human decision at T18 gate; value `Not Found` until then |
+| Choosing or changing the NFR-1 fixture size or thresholds without a human decision | Fixed by the human as RO-1 (Section 9); any change needs a new human decision |
 | Removing the `src/docsync/collectors/` stub | Not authorised by any requirement; needs human decision (PA-2) |
 | Diff output on drift | Rejected in DR-10 (ADD-10) |
 | Inferring `--github-repo` from git remotes, any `.git` access | Rejected in DR-11 (ADD-10) |
@@ -184,13 +183,23 @@ Binding condition 3 checklist: each redaction pattern (T4, T3), empty token (T3,
 | Reading or writing `.env`, keys, credentials | Forbidden by CLAUDE.md rule 6; `.env.example` is not touched by this plan |
 | Test-only dependencies (`responses`, `requests-mock`) | Would need approval (architecture Section 5); a hand-written fake is used |
 
+## 9. Resolved Open Items
+
+| ID | Open item | Decision (given by the human at the step 5 T17 gate) | Applied in |
+|---|---|---|---|
+| RO-1 | NFR-1 performance fixture size and measurement method (A-3, DR-12, OQ-5, PA-4) | Fixture, built in `tmp_path`, offline only, no network, no subprocess: 50 Python modules (5 packages x 10 modules, about 10 lines each); 20 test files with 2 test functions each; `pyproject.toml` declaring 30 runtime dependencies and 5 optional dependencies; a README.md and a LICENSE file. Method: call the generate path in-process (no subprocess, to exclude interpreter startup); one discarded warm-up call; then 3 measured calls with `time.perf_counter`, best (minimum) duration counts; offline forced explicitly (token unset via `monkeypatch.delenv` and `--offline`). Budget: target best run < 1.0 s; test assertion (hard fail) best run < 2.0 s; the test prints the measured best duration so step 7 can quote it. The test carries `@pytest.mark.perf`, registered in `pyproject.toml` because pytest runs with `--strict-markers`; the marker is for selection only and the test stays in the default run | T18; docs/01-requirements.md NFR-1 and Q16 |
+
 ## 10. Environment Limitations
 
-Known limitations of the environment the tests were run in. Steps 7 and 8 must carry each entry into the verification report and the PR description as a Known Limitation, not as an unexplained gap.
+Known limitations of the environment the tests were run in. Steps 7 and 8 must carry each entry into the verification report and the PR description as a Known Limitation, not as an unexplained gap. Step 7 must reproduce EL-1 to EL-3 in the Known Limitations section of docs/06-verification.md.
 
 | ID | Limitation | Affected test | Impact | How it is handled |
 |---|---|---|---|---|
 | EL-1 | Directory symlinks cannot be created on the development machine (Windows without elevated privileges or Developer Mode) | `tests/test_collect.py::test_scan_modules_symlinked_directory_is_not_followed` (T6; ADD-8, DR-9 "symlinked directories are not followed") | The test is skipped here, so "symlinked directories are not followed" is implemented (`os.walk(followlinks=False)` plus an explicit `is_symlink()` prune) but not exercised by a passing test on this machine | The skip is declared with `skipif` and an explicit reason (EL-1); it runs wherever symlinks can be created (for example Linux CI). Step 7 must record the skip in the verification report; whether it is covered by a manual or CI run is `Not Found` until step 7 produces that evidence |
+| EL-2 | The directory-creation-order determinism test cannot fail on NTFS, because NTFS enumerates directory entries in sorted order | `tests/test_integration.py::test_document_does_not_depend_on_file_creation_order` (T17; NFR-8, ADD-3) | On this machine the test cannot detect an ordering defect. It would only catch a real defect on a filesystem that returns unsorted entries (typical on Linux and CI) | Ordering is covered directly in T6 (`test_scan_modules_output_sorted_by_code_point`, `Z` before `a`). Step 7 should run the suite on a Linux/CI filesystem if one is available; otherwise record the gap as a Known Limitation |
+| EL-3 | No test exercises the live GitHub API, by design (NFR-7: no real network calls in tests) | `tests/test_github.py`, `tests/test_cli.py` (T9, T10, T14) | Real-network behaviour (TLS, redirects, actual response shape and rate limits) is not verified by the automated suite | Online behaviour is covered with fake sessions in T9, T10 and T14, and the autouse fixture makes any real call fail the test. Whether a manual online run is done is `Not Found` until step 7 produces that evidence |
+
+Recorded at T17: the full test suite runs in approximately 4.7 s on the development machine, dominated by 5 subprocess tests (`python -m docsync` runs). This is a measured observation, not a requirement.
 
 ---
 **Gate:** Approve step 4 and continue? (yes / changes needed)
