@@ -1,10 +1,18 @@
 """Local collector: reads repository files statically, never opens dotfiles (FR-7)."""
 
+import os
 import tomllib
 from pathlib import Path
 from typing import Any, NamedTuple
 
 from docsync.model import NOT_FOUND, FieldValue
+
+_SKIP_DIRS = frozenset(
+    {
+        "tests", "test", "__pycache__", "venv", "env",
+        "build", "dist", "node_modules", "site-packages",
+    }
+)
 
 
 class PyprojectFacts(NamedTuple):
@@ -73,3 +81,22 @@ def collect_pyproject(repo: Path) -> PyprojectFacts:
         entry_points=tuple(sorted(f"{k} = {v}" for k, v in scripts.items() if isinstance(v, str))),
         warnings=tuple(warnings),
     )
+
+
+def _skipped(name: str) -> bool:
+    return name.startswith(".") or name in _SKIP_DIRS or name.endswith(".egg-info")
+
+
+def scan_modules(repo: Path) -> tuple[str, ...]:
+    """List ``.py`` files as sorted POSIX paths relative to ``repo``.
+
+    Scans ``src/`` when it is a real directory, else the repo root. Skip-listed and
+    symlinked directories are not entered.
+    """
+    src = repo / "src"
+    base = src if src.is_dir() and not src.is_symlink() else repo
+    found: list[str] = []
+    for root, dirs, files in os.walk(base, followlinks=False):
+        dirs[:] = [d for d in dirs if not _skipped(d) and not (Path(root) / d).is_symlink()]
+        found.extend(Path(root, f).relative_to(repo).as_posix() for f in files if f.endswith(".py"))
+    return tuple(sorted(found))

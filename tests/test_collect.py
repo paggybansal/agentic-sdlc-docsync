@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from docsync.collect import collect_pyproject
+from docsync.collect import collect_pyproject, scan_modules
 from docsync.model import NOT_FOUND
 
 _FULL = """
@@ -196,3 +196,109 @@ def test_collect_pyproject_opens_only_pyproject(
 
     # Assert
     assert opened == ["pyproject.toml"]
+
+
+def _touch(repo: Path, *relative: str) -> None:
+    for rel in relative:
+        path = repo / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("", encoding="utf-8")
+
+
+def test_scan_modules_prefers_src_over_repo_root(tmp_path: Path) -> None:
+    # Arrange
+    _touch(tmp_path, "src/pkg/a.py", "stray.py")
+
+    # Act
+    modules = scan_modules(tmp_path)
+
+    # Assert
+    assert modules == ("src/pkg/a.py",)
+
+
+def test_scan_modules_without_src_uses_repo_root(tmp_path: Path) -> None:
+    # Arrange
+    _touch(tmp_path, "pkg/b.py", "top.py", "notes.txt")
+
+    # Act
+    modules = scan_modules(tmp_path)
+
+    # Assert
+    assert modules == ("pkg/b.py", "top.py")
+
+
+@pytest.mark.parametrize(
+    "skipped",
+    [
+        ".git", ".hidden", "tests", "test", "__pycache__", "venv", "env", "build", "dist",
+        "node_modules", "site-packages", "demo.egg-info",
+    ],
+)
+def test_scan_modules_skip_list_directory_is_excluded(tmp_path: Path, skipped: str) -> None:
+    # Arrange
+    _touch(tmp_path, f"{skipped}/x.py", "keep/y.py")
+
+    # Act
+    modules = scan_modules(tmp_path)
+
+    # Assert
+    assert modules == ("keep/y.py",)
+
+
+def test_scan_modules_skip_list_applies_inside_src(tmp_path: Path) -> None:
+    # Arrange
+    _touch(tmp_path, "src/pkg/__pycache__/c.py", "src/pkg/d.py")
+
+    # Act
+    modules = scan_modules(tmp_path)
+
+    # Assert
+    assert modules == ("src/pkg/d.py",)
+
+
+def test_scan_modules_symlinked_directory_is_not_followed(tmp_path: Path) -> None:
+    # Arrange
+    _touch(tmp_path, "real/z.py")
+    try:
+        (tmp_path / "link").symlink_to(tmp_path / "real", target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks not available on this platform")
+
+    # Act
+    modules = scan_modules(tmp_path)
+
+    # Assert
+    assert modules == ("real/z.py",)
+
+
+def test_scan_modules_output_sorted_by_code_point(tmp_path: Path) -> None:
+    # Arrange
+    _touch(tmp_path, "b.py", "Z.py", "a/z.py", "a.py")
+
+    # Act
+    modules = scan_modules(tmp_path)
+
+    # Assert
+    assert modules == ("Z.py", "a.py", "a/z.py", "b.py")
+
+
+def test_ec_6_scan_modules_empty_repo_gives_empty_tuple(tmp_path: Path) -> None:
+    # Arrange: empty repo
+
+    # Act
+    modules = scan_modules(tmp_path)
+
+    # Assert
+    assert modules == ()
+
+
+def test_scan_modules_paths_are_posix_and_relative(tmp_path: Path) -> None:
+    # Arrange
+    _touch(tmp_path, "src/a/b/c.py")
+
+    # Act
+    modules = scan_modules(tmp_path)
+
+    # Assert
+    assert modules == ("src/a/b/c.py",)
+    assert all("\\" not in m and not m.startswith("/") for m in modules)
