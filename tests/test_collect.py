@@ -1,11 +1,12 @@
 """Tests for docsync.collect (T5: pyproject.toml reading)."""
 
+import builtins
 from pathlib import Path
 
 import pytest
 
-from docsync.collect import collect_pyproject, scan_modules
-from docsync.model import NOT_FOUND
+from docsync.collect import collect, collect_pyproject, scan_modules
+from docsync.model import NOT_FOUND, ProjectFacts
 
 _FULL = """
 [project]
@@ -302,3 +303,178 @@ def test_scan_modules_paths_are_posix_and_relative(tmp_path: Path) -> None:
     # Assert
     assert modules == ("src/a/b/c.py",)
     assert all("\\" not in m and not m.startswith("/") for m in modules)
+
+
+def _write_test(repo: Path, name: str, source: str) -> None:
+    path = repo / "tests" / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(source, encoding="utf-8")
+
+
+def test_collect_counts_module_level_test_functions(tmp_path: Path) -> None:
+    # Arrange
+    source = "def test_one(): pass\ndef test_two(): pass\ndef helper(): pass\n"
+    _write_test(tmp_path, "test_a.py", source)
+
+    # Act
+    parts, _ = collect(tmp_path)
+
+    # Assert
+    assert parts["tests"] == {"test_files": "1", "test_functions": "2"}
+
+
+def test_collect_counts_methods_of_any_class(tmp_path: Path) -> None:
+    # Arrange
+    source = (
+        "class TestA:\n    def test_m(self): pass\n    def other(self): pass\n"
+        "class B:\n    def test_n(self): pass\n"
+    )
+    _write_test(tmp_path, "test_a.py", source)
+
+    # Act
+    parts, _ = collect(tmp_path)
+
+    # Assert
+    assert parts["tests"]["test_functions"] == "2"
+
+
+def test_collect_counts_async_test_functions(tmp_path: Path) -> None:
+    # Arrange
+    source = "async def test_a(): pass\nclass T:\n    async def test_b(self): pass\n"
+    _write_test(tmp_path, "test_a.py", source)
+
+    # Act
+    parts, _ = collect(tmp_path)
+
+    # Assert
+    assert parts["tests"]["test_functions"] == "2"
+
+
+def test_collect_ignores_functions_nested_inside_functions(tmp_path: Path) -> None:
+    # Arrange
+    _write_test(tmp_path, "test_a.py", "def test_a():\n    def test_inner(): pass\n")
+
+    # Act
+    parts, _ = collect(tmp_path)
+
+    # Assert
+    assert parts["tests"]["test_functions"] == "1"
+
+
+def test_collect_only_test_prefixed_py_files_are_counted(tmp_path: Path) -> None:
+    # Arrange
+    _write_test(tmp_path, "test_a.py", "def test_a(): pass\n")
+    _write_test(tmp_path, "conftest.py", "def test_b(): pass\n")
+    _write_test(tmp_path, "sub/test_c.py", "def test_c(): pass\n")
+
+    # Act
+    parts, _ = collect(tmp_path)
+
+    # Assert
+    assert parts["tests"] == {"test_files": "2", "test_functions": "2"}
+
+
+def test_ec_8_syntax_error_test_file_is_counted_with_one_warning(tmp_path: Path) -> None:
+    # Arrange
+    _write_test(tmp_path, "test_bad.py", "def test_x(:\n")
+    _write_test(tmp_path, "test_ok.py", "def test_y(): pass\n")
+
+    # Act
+    parts, warnings = collect(tmp_path)
+
+    # Assert
+    assert parts["tests"] == {"test_files": "2", "test_functions": "1"}
+    assert len(warnings) == 1
+    assert "tests/test_bad.py" in warnings[0]
+
+
+def test_ec_8_undecodable_test_file_is_counted_with_one_warning(tmp_path: Path) -> None:
+    # Arrange
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_bin.py").write_bytes(b"\xff\xfe\x00")
+
+    # Act
+    parts, warnings = collect(tmp_path)
+
+    # Assert
+    assert parts["tests"] == {"test_files": "1", "test_functions": "0"}
+    assert len(warnings) == 1
+
+
+def test_collect_tests_dir_without_tests_counts_zero(tmp_path: Path) -> None:
+    # Arrange
+    (tmp_path / "tests").mkdir()
+
+    # Act
+    parts, _ = collect(tmp_path)
+
+    # Assert
+    assert parts["tests"] == {"test_files": "0", "test_functions": "0"}
+
+
+def test_collect_warnings_combine_pyproject_then_tests(tmp_path: Path) -> None:
+    # Arrange
+    _write(tmp_path, "[project")
+    _write_test(tmp_path, "test_bad.py", "def (:\n")
+
+    # Act
+    _, warnings = collect(tmp_path)
+
+    # Assert
+    assert len(warnings) == 2
+    assert warnings[0].startswith("pyproject.toml")
+
+
+def test_ec_6_empty_repo_returns_complete_default_facts(tmp_path: Path) -> None:
+    # Arrange: empty repo
+
+    # Act
+    parts, warnings = collect(tmp_path)
+
+    # Assert
+    assert set(parts) == {
+        "overview", "identity", "modules", "entry_points",
+        "dependencies", "optional_dependencies", "tests",
+    }
+    assert parts["overview"] == {"name": NOT_FOUND, "description": NOT_FOUND}
+    assert parts["tests"] == {"test_files": NOT_FOUND, "test_functions": NOT_FOUND}
+    assert parts["modules"] == ()
+    assert warnings == ()
+
+
+def test_collect_parts_build_a_project_facts(tmp_path: Path) -> None:
+    # Arrange
+    parts, warnings = collect(tmp_path)
+
+    # Act
+    facts = ProjectFacts(hosted={}, warnings=warnings, **parts)
+
+    # Assert
+    assert facts.modules == ()
+
+
+def test_dotenv_never_opened(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Arrange
+    _write(tmp_path, _FULL)
+    _write_test(tmp_path, "test_a.py", "def test_a(): pass\n")
+    (tmp_path / ".env").write_text("TOKEN=abc", encoding="utf-8")
+    opened: list[str] = []
+    real_open, real_read_text = builtins.open, Path.read_text
+
+    def spy_open(file: object, *args: object, **kwargs: object) -> object:
+        opened.append(Path(str(file)).name)
+        return real_open(file, *args, **kwargs)  # type: ignore[call-overload]
+
+    def spy_read_text(self: Path, *args: object, **kwargs: object) -> str:
+        opened.append(self.name)
+        return real_read_text(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(builtins, "open", spy_open)
+    monkeypatch.setattr(Path, "read_text", spy_read_text)
+
+    # Act
+    collect(tmp_path)
+
+    # Assert
+    assert ".env" not in opened
+    assert "pyproject.toml" in opened

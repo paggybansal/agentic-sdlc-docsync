@@ -1,5 +1,6 @@
 """Local collector: reads repository files statically, never opens dotfiles (FR-7)."""
 
+import ast
 import os
 import tomllib
 from pathlib import Path
@@ -100,3 +101,57 @@ def scan_modules(repo: Path) -> tuple[str, ...]:
         dirs[:] = [d for d in dirs if not _skipped(d) and not (Path(root) / d).is_symlink()]
         found.extend(Path(root, f).relative_to(repo).as_posix() for f in files if f.endswith(".py"))
     return tuple(sorted(found))
+
+
+def _count_tests(body: list[ast.stmt]) -> int:
+    count = 0
+    for node in body:
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            count += node.name.startswith("test_")
+        elif isinstance(node, ast.ClassDef):
+            count += _count_tests(node.body)
+    return count
+
+
+def _summarise_tests(repo: Path) -> tuple[dict[str, FieldValue], list[str]]:
+    tests_dir = repo / "tests"
+    if not tests_dir.is_dir():
+        return {"test_files": NOT_FOUND, "test_functions": NOT_FOUND}, []
+    paths: list[Path] = []
+    for root, dirs, files in os.walk(tests_dir, followlinks=False):
+        dirs[:] = [d for d in dirs if d != "__pycache__" and not d.startswith(".")]
+        paths.extend(Path(root, f) for f in files if f.startswith("test_") and f.endswith(".py"))
+    functions, warnings = 0, []
+    for path in sorted(paths, key=lambda p: p.relative_to(repo).as_posix()):
+        rel = path.relative_to(repo).as_posix()
+        try:
+            functions += _count_tests(ast.parse(path.read_text(encoding="utf-8")).body)
+        except (SyntaxError, ValueError):
+            warnings.append(f"{rel} has a syntax error; counted as a file with no tests")
+        except (OSError, UnicodeDecodeError):
+            warnings.append(f"{rel} could not be read; counted as a file with no tests")
+    summary: dict[str, FieldValue] = {
+        "test_files": str(len(paths)),
+        "test_functions": str(functions),
+    }
+    return summary, warnings
+
+
+def collect(repo: Path) -> tuple[dict[str, Any], tuple[str, ...]]:
+    """Collect all local facts from ``repo``.
+
+    Returns ``(parts, warnings)``: ``parts`` holds the ``ProjectFacts`` fields except
+    ``hosted`` and ``warnings``. An empty repository yields complete default facts.
+    """
+    pyproject = collect_pyproject(repo)
+    tests, test_warnings = _summarise_tests(repo)
+    parts: dict[str, Any] = {
+        "overview": pyproject.overview,
+        "identity": pyproject.identity,
+        "modules": scan_modules(repo),
+        "entry_points": pyproject.entry_points,
+        "dependencies": pyproject.dependencies,
+        "optional_dependencies": pyproject.optional_dependencies,
+        "tests": tests,
+    }
+    return parts, (*pyproject.warnings, *test_warnings)
