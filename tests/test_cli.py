@@ -1,6 +1,7 @@
-"""Tests for docsync.cli (T13: parsing and validation)."""
+"""Tests for docsync.cli (T13: parsing and validation, T14: generate)."""
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -190,3 +191,269 @@ def test_generate_help_lists_all_flags(capsys: pytest.CaptureFixture[str]) -> No
     assert info.value.code == 0
     for flag in ("--repo", "--out", "--github-repo", "--offline", "--verbose"):
         assert flag in out
+
+
+_PYPROJECT = '[project]\nname = "demo"\ndescription = "A demo."\nversion = "1.0.0"\n'
+_SECRET_ENV = "tok-SECRET-value-123"
+_PAYLOAD = {"full_name": "octo/demo", "default_branch": "main", "topics": ["b", "a"]}
+
+
+class _Response:
+    def __init__(self, status_code: int = 200, payload: Any = None) -> None:
+        self.status_code = status_code
+        self._payload = payload
+
+    def json(self) -> Any:
+        return self._payload
+
+
+class _Session:
+    """Fake HTTP session: records calls, returns a canned response."""
+
+    def __init__(self, response: _Response | None = None) -> None:
+        self.calls: list[str] = []
+        self._response = response or _Response(404)
+
+    def get(self, url: str, *, headers: dict[str, str], timeout: float) -> _Response:
+        self.calls.append(url)
+        return self._response
+
+
+@pytest.fixture
+def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A tiny repo that is also the cwd, with no token in the environment."""
+    (tmp_path / "pyproject.toml").write_text(_PYPROJECT, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("DOCSYNC_GITHUB_TOKEN", raising=False)
+    return tmp_path
+
+
+def test_generate_writes_default_output(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    # Arrange / Act
+    code = main(["generate"])
+
+    # Assert
+    document = (repo / "docs" / "PROJECT_DOCS.md").read_text(encoding="utf-8")
+    assert code == 0
+    assert capsys.readouterr().out == "wrote docs/PROJECT_DOCS.md\n"
+    assert document.startswith("## Project Overview")
+    assert "| Name | demo |" in document
+
+
+def test_generate_creates_missing_parent_directories(repo: Path) -> None:
+    # Arrange / Act
+    code = main(["generate", "--out", "deep/er/out.md"])
+
+    # Assert
+    assert code == 0
+    assert (repo / "deep" / "er" / "out.md").is_file()
+
+
+def test_generate_written_bytes_are_utf8_lf(repo: Path) -> None:
+    # Arrange
+    (repo / "pyproject.toml").write_text(
+        '[project]\nname = "d"\ndescription = "café\\r\\nbar"\n', encoding="utf-8"
+    )
+
+    # Act
+    main(["generate"])
+
+    # Assert
+    data = (repo / "docs" / "PROJECT_DOCS.md").read_bytes()
+    assert b"\r" not in data
+    assert "café bar".encode() in data
+    assert data.endswith(b"|\n")
+
+
+def test_relative_out_is_resolved_against_cwd_not_repo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Arrange
+    target = tmp_path / "repo"
+    target.mkdir()
+    (target / "pyproject.toml").write_text(_PYPROJECT, encoding="utf-8")
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
+    monkeypatch.delenv("DOCSYNC_GITHUB_TOKEN", raising=False)
+
+    # Act
+    code = main(["generate", "--repo", str(target), "--out", "o.md"])
+
+    # Assert
+    assert code == 0
+    assert (cwd / "o.md").is_file()
+    assert not (target / "o.md").exists()
+
+
+def test_offline_flag_makes_no_requests(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Arrange
+    monkeypatch.setenv("DOCSYNC_GITHUB_TOKEN", _SECRET_ENV)
+    session = _Session()
+
+    # Act
+    code = main(["generate", "--github-repo", "octo/demo", "--offline"], session)
+
+    # Assert
+    assert code == 0
+    assert session.calls == []
+
+
+def test_ec_5_generate_without_token_makes_no_requests(repo: Path) -> None:
+    # Arrange
+    session = _Session()
+
+    # Act
+    code = main(["generate", "--github-repo", "octo/demo"], session)
+
+    # Assert
+    assert code == 0
+    assert session.calls == []
+    assert "| Full Name | Not Found |" in (repo / "docs/PROJECT_DOCS.md").read_text("utf-8")
+
+
+def test_ec_14_generate_without_github_repo_makes_no_requests(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Arrange
+    monkeypatch.setenv("DOCSYNC_GITHUB_TOKEN", _SECRET_ENV)
+    session = _Session()
+
+    # Act
+    code = main(["generate"], session)
+
+    # Assert
+    assert code == 0
+    assert session.calls == []
+
+
+def test_generate_online_renders_hosted_fields(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Arrange
+    monkeypatch.setenv("DOCSYNC_GITHUB_TOKEN", _SECRET_ENV)
+    session = _Session(_Response(200, _PAYLOAD))
+
+    # Act
+    code = main(["generate", "--github-repo", "octo/demo"], session)
+
+    # Assert
+    document = (repo / "docs/PROJECT_DOCS.md").read_text("utf-8")
+    assert code == 0
+    assert session.calls == ["https://api.github.com/repos/octo/demo"]
+    assert "| Full Name | octo/demo |" in document
+    assert "| Topics | a, b |" in document
+
+
+def test_generate_api_failure_warns_on_stderr_and_exits_0(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Arrange
+    monkeypatch.setenv("DOCSYNC_GITHUB_TOKEN", _SECRET_ENV)
+
+    # Act
+    code = main(["generate", "--github-repo", "octo/demo"], _Session(_Response(404)))
+
+    # Assert
+    captured = capsys.readouterr()
+    assert code == 0
+    assert "warning: GitHub lookup failed" in captured.err
+    assert captured.out == "wrote docs/PROJECT_DOCS.md\n"
+
+
+def test_collect_warnings_go_to_stderr_not_stdout(
+    repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Arrange
+    (repo / "pyproject.toml").write_text("[project", encoding="utf-8")
+
+    # Act
+    code = main(["generate"])
+
+    # Assert
+    captured = capsys.readouterr()
+    assert code == 0
+    assert "warning: pyproject.toml is not valid TOML" in captured.err
+    assert "warning" not in captured.out
+
+
+def test_token_value_never_in_output_or_file(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Arrange
+    monkeypatch.setenv("DOCSYNC_GITHUB_TOKEN", _SECRET_ENV)
+
+    # Act
+    main(["generate", "--github-repo", "octo/demo", "--verbose"], _Session(_Response(403)))
+
+    # Assert
+    captured = capsys.readouterr()
+    assert _SECRET_ENV not in captured.out + captured.err
+    assert _SECRET_ENV not in (repo / "docs/PROJECT_DOCS.md").read_text("utf-8")
+    assert "docsync: DOCSYNC_GITHUB_TOKEN is set" in captured.err
+
+
+def test_verbose_reports_token_not_set(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    # Arrange / Act
+    main(["generate", "--verbose"])
+
+    # Assert
+    assert "docsync: DOCSYNC_GITHUB_TOKEN is not set" in capsys.readouterr().err
+
+
+def test_without_verbose_no_diagnostics_are_printed(
+    repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Arrange / Act
+    main(["generate"])
+
+    # Assert
+    assert capsys.readouterr().err == ""
+
+
+def test_redaction_applied_to_file_and_console(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Arrange: secrets reach the document (description) and the console (warning path)
+    monkeypatch.setenv("DOCSYNC_GITHUB_TOKEN", _SECRET_ENV)
+    shaped = "ghp_A1b2C3d4E5f6G7h8I9j0K1"
+    description = f"uses {shaped} and {_SECRET_ENV}"
+    (repo / "pyproject.toml").write_text(
+        f'[project]\nname = "demo"\ndescription = "{description}"\n', encoding="utf-8"
+    )
+    (repo / "tests").mkdir()
+    (repo / "tests" / f"test_{shaped}.py").write_text("def test_x(:\n", encoding="utf-8")
+
+    # Act
+    code = main(["generate"])
+
+    # Assert
+    captured = capsys.readouterr()
+    document = (repo / "docs/PROJECT_DOCS.md").read_text("utf-8")
+    assert code == 0
+    assert "warning: tests/test_" in captured.err
+    for secret in (shaped, _SECRET_ENV):
+        assert secret not in document
+        assert secret not in captured.out + captured.err
+    assert "[REDACTED]" in document
+    assert "[REDACTED]" in captured.err
+
+
+def test_verbose_output_is_redacted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Arrange
+    shaped = "ghp_A1b2C3d4E5f6G7h8I9j0K1"
+    target = tmp_path / shaped
+    target.mkdir()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("DOCSYNC_GITHUB_TOKEN", raising=False)
+
+    # Act
+    code = main(["generate", "--repo", str(target), "--out", "o.md", "--verbose"])
+
+    # Assert
+    captured = capsys.readouterr()
+    assert code == 0
+    assert shaped not in captured.err
+    assert "[REDACTED]" in captured.err

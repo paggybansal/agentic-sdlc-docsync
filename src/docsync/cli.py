@@ -1,6 +1,7 @@
-"""Command-line interface: argument parsing and validation (FR-18, FR-19)."""
+"""Command-line interface: parsing, validation and the generate command (FR-1, FR-18)."""
 
 import argparse
+import os
 import re
 import sys
 from collections.abc import Sequence
@@ -8,8 +9,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NoReturn
 
+from docsync.collect import collect
 from docsync.errors import UsageError
+from docsync.github import HttpSession, fetch
+from docsync.model import ProjectFacts
 from docsync.redact import redact
+from docsync.render import render
 
 _GITHUB_REPO = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 
@@ -62,12 +67,37 @@ def parse_args(argv: Sequence[str] | None = None) -> CliArgs:
     return CliArgs(ns.command, Path(ns.repo), Path(ns.out), ns.github_repo, ns.offline, ns.verbose)
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    """Console entry point; returns the process exit code."""
+def _emit(message: str, token: str | None, *, err: bool = False) -> None:
+    """Print ``message`` through the single redaction function (FR-6, FR-20)."""
+    print(redact(message, secrets=(token or "",)), file=sys.stderr if err else sys.stdout)
+
+
+def _generate(args: CliArgs, session: HttpSession | None) -> int:
+    token = os.environ.get("DOCSYNC_GITHUB_TOKEN")
+    if args.verbose:
+        state = "set" if token and token.strip() else "not set"
+        for line in (f"repo: {args.repo}", f"out: {args.out}", f"DOCSYNC_GITHUB_TOKEN is {state}"):
+            _emit(f"docsync: {line}", token, err=True)
+    parts, warnings = collect(args.repo)
+    hosted, hosted_warnings = fetch(args.github_repo, args.offline, token, session)
+    facts = ProjectFacts(hosted=hosted, warnings=(*warnings, *hosted_warnings), **parts)
+    text = redact(render(facts), secrets=(token or "",))
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    args.out.write_bytes(text.encode("utf-8"))
+    for warning in facts.warnings:
+        _emit(f"warning: {warning}", token, err=True)
+    _emit(f"wrote {args.out.as_posix()}", token)
+    return 0
+
+
+def main(argv: Sequence[str] | None = None, session: HttpSession | None = None) -> int:
+    """Console entry point; returns the process exit code. ``session`` is a test seam."""
     try:
-        parse_args(argv)
+        args = parse_args(argv)
     except UsageError as exc:
         print(redact(f"docsync: error: {exc}"), file=sys.stderr)
         return 2
-    # TEMPORARY loud guard: removed by T14 (generate) and T16 (check); must not survive step 5.
-    raise NotImplementedError("generate is implemented in task T14, check in task T16")
+    if args.command == "generate":
+        return _generate(args, session)
+    # TEMPORARY loud guard: removed by T16 (check); must not survive step 5.
+    raise NotImplementedError("check is implemented in task T16")
