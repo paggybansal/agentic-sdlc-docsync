@@ -3,6 +3,7 @@
 from typing import Any
 
 import pytest
+import requests
 
 from docsync.github import HOSTED_KEYS, fetch
 from docsync.model import NOT_FOUND
@@ -135,3 +136,174 @@ def test_fake_session_raises_configured_error() -> None:
     # Act / Assert
     with pytest.raises(ConnectionError):
         session.get("https://example.test", headers={}, timeout=5)
+
+
+_TOKEN = "tok-SECRET-value-123"
+
+
+class FakeResponse:
+    """Minimal stand-in for ``requests.Response`` (``status_code`` and ``json()``)."""
+
+    def __init__(self, status_code: int = 200, payload: Any = None, bad_json: bool = False) -> None:
+        self.status_code = status_code
+        self._payload = payload
+        self._bad_json = bad_json
+
+    def json(self) -> Any:
+        if self._bad_json:
+            raise requests.JSONDecodeError("Expecting value", "doc", 0)
+        return self._payload
+
+
+def _online(response: Any = None, error: Exception | None = None) -> tuple[Any, FakeSession]:
+    session = FakeSession(response=response, error=error)
+    return fetch("octo/demo", False, _TOKEN, session), session
+
+
+def _assert_degraded(result: Any, session: FakeSession) -> None:
+    hosted, warnings = result
+    assert set(hosted.values()) == {NOT_FOUND}
+    assert list(hosted) == list(HOSTED_KEYS)
+    assert len(warnings) == 1
+    assert len(session.calls) == 1
+    assert _TOKEN not in warnings[0]
+
+
+def test_online_request_makes_exactly_one_get_with_fixed_url() -> None:
+    # Arrange / Act
+    _, session = _online(FakeResponse(404))
+
+    # Assert
+    assert [c[0] for c in session.calls] == ["https://api.github.com/repos/octo/demo"]
+
+
+def test_online_request_uses_timeout_of_5_seconds() -> None:
+    # Arrange / Act
+    _, session = _online(FakeResponse(404))
+
+    # Assert
+    assert session.calls[0][2] == 5
+
+
+def test_online_request_sends_bearer_authorization_header() -> None:
+    # Arrange / Act
+    _, session = _online(FakeResponse(404))
+
+    # Assert
+    assert session.calls[0][1] == {"Authorization": f"Bearer {_TOKEN}"}
+
+
+def test_online_request_strips_whitespace_around_token_and_repo() -> None:
+    # Arrange
+    session = FakeSession(response=FakeResponse(404))
+
+    # Act
+    fetch(" octo/demo ", False, f" {_TOKEN}\n", session)
+
+    # Assert
+    assert session.calls[0][0].endswith("/repos/octo/demo")
+    assert session.calls[0][1]["Authorization"] == f"Bearer {_TOKEN}"
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        requests.Timeout("t"),
+        requests.ConnectTimeout("t"),
+        requests.ReadTimeout("t"),
+        requests.ConnectionError("c"),
+        requests.exceptions.SSLError("s"),
+        requests.TooManyRedirects("r"),
+        requests.RequestException("x"),
+    ],
+    ids=lambda e: type(e).__name__,
+)
+def test_ec_1_request_exception_degrades_with_one_warning(error: Exception) -> None:
+    # Arrange / Act
+    result, session = _online(error=error)
+
+    # Assert
+    _assert_degraded(result, session)
+
+
+def test_ec_1_timeout_warning_says_timed_out() -> None:
+    # Arrange / Act
+    (_, warnings), _ = _online(error=requests.Timeout("t"))
+
+    # Assert
+    assert "timed out" in warnings[0]
+
+
+def test_ec_1_mocked_timeout_returns_without_waiting() -> None:
+    # Arrange: FakeSession raises immediately, so no real 5 s wait (supports NFR-2)
+    # Act
+    result, session = _online(error=requests.Timeout("t"))
+
+    # Assert
+    assert len(session.calls) == 1
+    assert session.calls[0][2] == 5
+    assert set(result[0].values()) == {NOT_FOUND}
+
+
+def test_ec_1_exception_text_and_token_are_never_echoed() -> None:
+    # Arrange
+    error = requests.ConnectionError(f"https://api.github.com failed Bearer {_TOKEN}")
+
+    # Act
+    (_, warnings), _ = _online(error=error)
+
+    # Assert
+    assert _TOKEN not in warnings[0]
+    assert "api.github.com" not in warnings[0]
+
+
+def test_ec_2_api_404_degrades() -> None:
+    # Arrange / Act
+    result, session = _online(FakeResponse(404))
+
+    # Assert
+    _assert_degraded(result, session)
+    assert "404" in result[1][0]
+
+
+def test_ec_3_api_403_rate_limit_degrades() -> None:
+    # Arrange / Act
+    result, session = _online(FakeResponse(403))
+
+    # Assert
+    _assert_degraded(result, session)
+    assert "403" in result[1][0]
+
+
+def test_non_2xx_status_other_than_404_403_degrades() -> None:
+    # Arrange / Act
+    result, session = _online(FakeResponse(500))
+
+    # Assert
+    _assert_degraded(result, session)
+    assert "500" in result[1][0]
+
+
+def test_ec_4_invalid_json_degrades() -> None:
+    # Arrange / Act
+    result, session = _online(FakeResponse(200, bad_json=True))
+
+    # Assert
+    _assert_degraded(result, session)
+
+
+@pytest.mark.parametrize("payload", [[], ["a"], "text", 5, None], ids=repr)
+def test_ec_4_non_object_json_payload_degrades(payload: Any) -> None:
+    # Arrange / Act
+    result, session = _online(FakeResponse(200, payload))
+
+    # Assert
+    _assert_degraded(result, session)
+
+
+def test_online_failure_makes_no_retry() -> None:
+    # Arrange / Act
+    _, session = _online(error=requests.ConnectionError("c"))
+
+    # Assert
+    assert len(session.calls) == 1
