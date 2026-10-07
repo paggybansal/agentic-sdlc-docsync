@@ -1,12 +1,16 @@
-"""Tests for docsync.cli (T13: parsing and validation, T14: generate)."""
+"""Tests for docsync.cli (T13/T13b: parsing and validation, T14: generate, T15: errors)."""
 
+import ast
+import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from docsync.cli import CliArgs, main, parse_args
-from docsync.errors import UsageError
+from docsync.errors import CollectError, UsageError
 
 _TOKEN_SHAPED = "ghp_A1b2C3d4E5f6G7h8I9j0K1"
 
@@ -574,3 +578,193 @@ def test_invalid_out_echoing_a_token_is_redacted(capsys: pytest.CaptureFixture[s
     assert code == 2
     assert _TOKEN_SHAPED not in err
     assert "[REDACTED]" in err
+
+
+def _boom(error: BaseException) -> Any:
+    def raiser(*args: object, **kwargs: object) -> None:
+        raise error
+
+    return raiser
+
+
+def _run_module(*args: str, cwd: Path) -> Any:
+    src = Path(__file__).resolve().parents[1] / "src"
+    env = {**os.environ, "PYTHONPATH": str(src)}
+    env.pop("DOCSYNC_GITHUB_TOKEN", None)
+    return subprocess.run(
+        [sys.executable, "-m", "docsync", *args],
+        cwd=cwd, env=env, capture_output=True, text=True, check=False,
+    )
+
+
+def test_invalid_input_exit_2_no_traceback(tmp_path: Path) -> None:
+    # Arrange / Act
+    result = _run_module("generate", "--repo", "does-not-exist", cwd=tmp_path)
+
+    # Assert
+    assert result.returncode == 2
+    assert "Traceback" not in result.stderr
+    assert len(result.stderr.strip().splitlines()) == 1
+
+
+def test_python_dash_m_docsync_help_runs(tmp_path: Path) -> None:
+    # Arrange / Act
+    result = _run_module("--help", cwd=tmp_path)
+
+    # Assert
+    assert result.returncode == 0
+    assert "generate" in result.stdout
+    assert "check" in result.stdout
+
+
+def test_python_dash_m_docsync_generate_writes_file(tmp_path: Path) -> None:
+    # Arrange
+    (tmp_path / "pyproject.toml").write_text(_PYPROJECT, encoding="utf-8")
+
+    # Act
+    result = _run_module("generate", "--offline", cwd=tmp_path)
+
+    # Assert
+    assert result.returncode == 0
+    assert result.stdout == "wrote docs/PROJECT_DOCS.md\n"
+    assert (tmp_path / "docs" / "PROJECT_DOCS.md").is_file()
+
+
+def test_keyboard_interrupt_exits_2_without_traceback(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Arrange
+    monkeypatch.setattr("docsync.cli.collect", _boom(KeyboardInterrupt()))
+
+    # Act
+    code = main(["generate"])
+
+    # Assert
+    assert code == 2
+    assert "interrupted" in _assert_one_line_error(capsys)
+
+
+def test_broken_pipe_exits_2_without_traceback(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Arrange
+    monkeypatch.setattr("docsync.cli.collect", _boom(BrokenPipeError()))
+
+    # Act
+    code = main(["generate"])
+
+    # Assert
+    assert code == 2
+    assert "pipe" in _assert_one_line_error(capsys)
+
+
+def test_write_failure_at_out_exits_2_without_traceback(
+    repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Arrange: --out names an existing directory, so the write fails
+    (repo / "out.md").mkdir()
+
+    # Act
+    code = main(["generate", "--out", "out.md"])
+
+    # Assert
+    assert code == 2
+    assert "I/O error" in _assert_one_line_error(capsys)
+
+
+def test_domain_error_exits_2_with_its_message(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Arrange
+    monkeypatch.setattr("docsync.cli.collect", _boom(CollectError("cannot collect")))
+
+    # Act
+    code = main(["generate"])
+
+    # Assert
+    assert code == 2
+    assert "docsync: error: cannot collect" in _assert_one_line_error(capsys)
+
+
+def test_domain_error_message_is_redacted(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Arrange
+    monkeypatch.setattr("docsync.cli.collect", _boom(CollectError(f"bad {_TOKEN_SHAPED}")))
+
+    # Act
+    code = main(["generate"])
+
+    # Assert
+    err = _assert_one_line_error(capsys)
+    assert code == 2
+    assert _TOKEN_SHAPED not in err
+
+
+def test_domain_error_with_newlines_is_one_line(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Arrange
+    monkeypatch.setattr("docsync.cli.collect", _boom(CollectError("a\nb\r\nc")))
+
+    # Act
+    code = main(["generate"])
+
+    # Assert
+    assert code == 2
+    assert "a b c" in _assert_one_line_error(capsys)
+
+
+def test_unexpected_exception_hides_type_and_text_without_verbose(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Arrange
+    monkeypatch.setattr("docsync.cli.collect", _boom(RuntimeError("private detail")))
+
+    # Act
+    code = main(["generate"])
+
+    # Assert
+    err = _assert_one_line_error(capsys)
+    assert code == 2
+    assert "unexpected internal error" in err
+    assert "RuntimeError" not in err
+    assert "private detail" not in err
+
+
+def test_unexpected_exception_shows_type_name_only_with_verbose(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Arrange
+    monkeypatch.setattr("docsync.cli.collect", _boom(RuntimeError("private detail")))
+
+    # Act
+    code = main(["generate", "--verbose"])
+
+    # Assert
+    err = capsys.readouterr().err
+    assert code == 2
+    assert "unexpected internal error (RuntimeError)" in err
+    assert "private detail" not in err
+    assert "Traceback" not in err
+
+
+def test_help_is_not_turned_into_an_error(capsys: pytest.CaptureFixture[str]) -> None:
+    # Arrange / Act / Assert
+    with pytest.raises(SystemExit) as info:
+        main(["--help"])
+    assert info.value.code == 0
+
+
+def test_no_bare_except_in_source() -> None:
+    # Arrange
+    src = Path(__file__).resolve().parents[1] / "src" / "docsync"
+    bare = [
+        f"{path.name}:{node.lineno}"
+        for path in src.rglob("*.py")
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+        if isinstance(node, ast.ExceptHandler) and node.type is None
+    ]
+
+    # Act / Assert
+    assert bare == []

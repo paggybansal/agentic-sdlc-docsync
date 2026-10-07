@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import NoReturn
 
 from docsync.collect import collect
-from docsync.errors import UsageError
+from docsync.errors import DocsyncError, UsageError
 from docsync.github import HttpSession, fetch
 from docsync.model import ProjectFacts
 from docsync.redact import redact
@@ -99,14 +99,34 @@ def _generate(args: CliArgs, session: HttpSession | None) -> int:
     return 0
 
 
+def _fail(message: str) -> int:
+    """Print one redacted ``docsync: error`` line on stderr and return exit code 2."""
+    token = os.environ.get("DOCSYNC_GITHUB_TOKEN")
+    _emit(f"docsync: error: {' '.join(message.split())}", token, err=True)
+    return 2
+
+
 def main(argv: Sequence[str] | None = None, session: HttpSession | None = None) -> int:
-    """Console entry point; returns the process exit code. ``session`` is a test seam."""
+    """Console entry point; returns exit code 0, 1 or 2 and never a traceback.
+
+    ``session`` is a test seam. ``--help`` is the only ``SystemExit`` source besides usage errors.
+    """
+    verbose = False
     try:
         args = parse_args(argv)
-    except UsageError as exc:
-        print(redact(f"docsync: error: {exc}"), file=sys.stderr)
-        return 2
-    if args.command == "generate":
-        return _generate(args, session)
-    # TEMPORARY loud guard: removed by T16 (check); must not survive step 5.
-    raise NotImplementedError("check is implemented in task T16")
+        verbose = args.verbose
+        if args.command == "generate":
+            return _generate(args, session)
+        # TEMPORARY loud guard: removed by T16 (check); must not survive step 5.
+        raise NotImplementedError("check is implemented in task T16")
+    except KeyboardInterrupt:
+        return _fail("interrupted")
+    except BrokenPipeError:
+        return _fail("output pipe closed")
+    except DocsyncError as exc:
+        return _fail(str(exc))
+    except OSError as exc:
+        return _fail(f"I/O error: {exc}")
+    except Exception as exc:  # noqa: BLE001  mandated catch-all: exit 2, no traceback (FR-19)
+        detail = f" ({type(exc).__name__})" if verbose else ""
+        return _fail(f"unexpected internal error{detail}")
