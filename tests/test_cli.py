@@ -11,6 +11,12 @@ from docsync.errors import UsageError
 _TOKEN_SHAPED = "ghp_A1b2C3d4E5f6G7h8I9j0K1"
 
 
+@pytest.fixture(autouse=True)
+def _isolated_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run every CLI test with the cwd in tmp_path, so none depends on or writes to the repo."""
+    monkeypatch.chdir(tmp_path)
+
+
 def _assert_one_line_error(capsys: pytest.CaptureFixture[str]) -> str:
     err = capsys.readouterr().err
     assert len(err.strip().splitlines()) == 1
@@ -272,7 +278,7 @@ def test_relative_out_is_resolved_against_cwd_not_repo(
     target = tmp_path / "repo"
     target.mkdir()
     (target / "pyproject.toml").write_text(_PYPROJECT, encoding="utf-8")
-    cwd = tmp_path / "cwd"
+    cwd = target / "sub"
     cwd.mkdir()
     monkeypatch.chdir(cwd)
     monkeypatch.delenv("DOCSYNC_GITHUB_TOKEN", raising=False)
@@ -450,10 +456,121 @@ def test_verbose_output_is_redacted(
     monkeypatch.delenv("DOCSYNC_GITHUB_TOKEN", raising=False)
 
     # Act
-    code = main(["generate", "--repo", str(target), "--out", "o.md", "--verbose"])
+    code = main(["generate", "--repo", str(target), "--out", str(target / "o.md"), "--verbose"])
 
     # Assert
     captured = capsys.readouterr()
     assert code == 0
     assert shaped not in captured.err
     assert "[REDACTED]" in captured.err
+
+
+@pytest.mark.parametrize("out", ["a.md", "docs/x.md", "A.MD", "x.Md", "sub/../x.md"])
+def test_out_ending_in_md_inside_repo_is_accepted(out: str) -> None:
+    # Arrange / Act
+    args = parse_args(["generate", "--out", out])
+
+    # Assert
+    assert args.out == Path(out)
+
+
+@pytest.mark.parametrize(
+    "out", ["a.txt", "a", "a.markdown", "docs/PROJECT_DOCS", ".md", "a.md.bak"]
+)
+def test_out_not_ending_in_md_is_rejected(out: str) -> None:
+    # Arrange / Act / Assert
+    with pytest.raises(UsageError, match=r"--out must end in \.md"):
+        parse_args(["generate", "--out", out])
+
+
+@pytest.mark.parametrize("out", ["../x.md", "sub/../../x.md", "../r2/x.md"])
+def test_out_escaping_repo_via_dotdot_is_rejected(out: str) -> None:
+    # Arrange / Act / Assert
+    with pytest.raises(UsageError, match="--out must be inside --repo"):
+        parse_args(["generate", "--out", out])
+
+
+def test_out_absolute_path_outside_repo_is_rejected(tmp_path: Path) -> None:
+    # Arrange
+    outside = tmp_path.parent / "elsewhere.md"
+
+    # Act / Assert
+    with pytest.raises(UsageError, match="--out must be inside --repo"):
+        parse_args(["generate", "--out", str(outside)])
+
+
+def test_out_absolute_path_inside_repo_is_accepted(tmp_path: Path) -> None:
+    # Arrange
+    inside = tmp_path / "sub" / "o.md"
+
+    # Act
+    args = parse_args(["generate", "--out", str(inside)])
+
+    # Assert
+    assert args.out == inside
+
+
+def test_out_in_sibling_directory_sharing_the_repo_name_prefix_is_rejected(
+    tmp_path: Path,
+) -> None:
+    # Arrange
+    repo = tmp_path / "r"
+    sibling = tmp_path / "r2"
+    repo.mkdir()
+    sibling.mkdir()
+
+    # Act / Assert
+    with pytest.raises(UsageError, match="--out must be inside --repo"):
+        parse_args(["generate", "--repo", str(repo), "--out", str(sibling / "x.md")])
+
+
+def test_default_out_is_rejected_when_cwd_is_outside_repo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Arrange
+    repo = tmp_path / "r"
+    elsewhere = tmp_path / "elsewhere"
+    repo.mkdir()
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+
+    # Act / Assert
+    with pytest.raises(UsageError, match="--out must be inside --repo"):
+        parse_args(["generate", "--repo", str(repo)])
+
+
+def test_default_out_is_accepted_when_cwd_is_the_repo() -> None:
+    # Arrange / Act
+    args = parse_args(["check"])
+
+    # Assert
+    assert args.out == Path("docs/PROJECT_DOCS.md")
+
+
+def test_out_rules_apply_to_check_too() -> None:
+    # Arrange / Act / Assert
+    with pytest.raises(UsageError, match=r"--out must end in \.md"):
+        parse_args(["check", "--out", "x.txt"])
+
+
+def test_invalid_out_exits_2_with_one_line_and_no_file_written(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Arrange / Act
+    code = main(["generate", "--out", "../escape.md"])
+
+    # Assert
+    assert code == 2
+    assert "--out" in _assert_one_line_error(capsys)
+    assert not (tmp_path.parent / "escape.md").exists()
+
+
+def test_invalid_out_echoing_a_token_is_redacted(capsys: pytest.CaptureFixture[str]) -> None:
+    # Arrange / Act
+    code = main(["generate", "--out", f"{_TOKEN_SHAPED}.txt"])
+
+    # Assert
+    err = _assert_one_line_error(capsys)
+    assert code == 2
+    assert _TOKEN_SHAPED not in err
+    assert "[REDACTED]" in err

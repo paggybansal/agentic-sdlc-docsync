@@ -57,11 +57,20 @@ def _valid_github_repo(value: str) -> bool:
     return bool(_GITHUB_REPO.fullmatch(value)) and owner not in dots and name not in dots
 
 
+def _check_out(repo: Path, out: Path) -> None:
+    """``--out`` must be a ``.md`` file inside ``--repo`` (a relative path is cwd-based)."""
+    if out.suffix.lower() != ".md":
+        raise UsageError(f"--out must end in .md, got {str(out)!r}")
+    if not out.resolve().is_relative_to(repo.resolve()):
+        raise UsageError(f"--out must be inside --repo, got {str(out)!r}")
+
+
 def parse_args(argv: Sequence[str] | None = None) -> CliArgs:
     """Parse and validate ``argv``; raise ``UsageError`` on any invalid input."""
     ns = build_parser().parse_args(argv)
     if not Path(ns.repo).is_dir():
         raise UsageError(f"--repo is not an existing directory: {ns.repo!r}")
+    _check_out(Path(ns.repo), Path(ns.out))
     if ns.github_repo is not None and not _valid_github_repo(ns.github_repo):
         raise UsageError(f"--github-repo must look like OWNER/NAME, got {ns.github_repo!r}")
     return CliArgs(ns.command, Path(ns.repo), Path(ns.out), ns.github_repo, ns.offline, ns.verbose)
