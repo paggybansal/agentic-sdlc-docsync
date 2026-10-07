@@ -8,7 +8,7 @@ _BODY = "A1b2C3d4E5f6G7h8I9j0"
 
 
 @pytest.mark.parametrize("prefix", ["ghp_", "gho_", "ghu_", "ghs_", "ghr_", "github_pat_"])
-def test_redact_token_prefix_is_replaced(prefix: str) -> None:
+def test_ec_9_redact_token_prefix_is_replaced(prefix: str) -> None:
     # Arrange
     text = f"token {prefix}{_BODY} end"
 
@@ -19,7 +19,7 @@ def test_redact_token_prefix_is_replaced(prefix: str) -> None:
     assert result == f"token {PLACEHOLDER} end"
 
 
-def test_redact_literal_secret_is_replaced() -> None:
+def test_ec_9_redact_literal_secret_is_replaced() -> None:
     # Arrange
     text = "the value is hunter2-value here"
 
