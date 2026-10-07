@@ -1,0 +1,34 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Test / coverage
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Secrets — NEVER commit
+.env
+.env.local
+*.pem
+*.key
+secrets.*
+credentials.*
+
+# IDE / OS
+.idea/
+.vscode/
+Thumbs.db
+*.log
+
+# Claude Code local state (keep config, ignore runtime noise)
+.claude/settings.local.json
+.claude/cache/
+.claude/sessions/
+.claude/projects/
+.claude/backups/
