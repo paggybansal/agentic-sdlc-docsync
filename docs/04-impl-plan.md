@@ -1,0 +1,181 @@
+# Implementation Plan — DS-1 Automated Documentation Sync
+
+| Field | Value |
+|---|---|
+| Artifact | docs/04-impl-plan.md |
+| SDLC Step | 4 — Implementation Plan |
+| Source documents | docs/01-requirements.md, docs/02-architecture.md (v1.1), docs/03-design-review.md (outcome: Approved with conditions), CLAUDE.md |
+| Author | impl-planner |
+| Date | 2026-10-07 |
+| Status | Draft |
+
+## 1. Plan Summary
+
+| Item | Value |
+|---|---|
+| Task count | 19 (T1 to T19); 17 production-code tasks, T18 and T19 are verification tasks |
+| Size rule | Each production task is at most ~40 lines of production code; its tests are part of the same task (Done criteria) |
+| Total estimate | 560 minutes if done sequentially by one implementer; critical path 280 minutes (Section 5) |
+| Step 5 rule | One task at a time, stop for human approval after each (CLAUDE.md rule 7) |
+
+Build order rationale (matches the mandated order): errors/model/sentinel (T1) -> redactor (T3, T4) and collectors (T5 to T7, T8 to T10) -> renderer (T11, T12) -> CLI (T13 to T15) -> `check` mode (T16, only after `generate` works end to end in T14/T15) -> integration, perf and quality gates (T17 to T19). Redaction is built early because the CLI (T13) echoes user input through it (ADD-1). `.gitattributes` (T2) has no code dependency and satisfies the step 3 condition for ADD-4.
+
+Binding step 3 conditions and where they land:
+
+| Condition | Where |
+|---|---|
+| `.gitattributes` LF entry (ADD-4, DR-3) | T2 |
+| Perf fixture size for NFR-1 is `Not Found` until fixed (A-3, DR-12) | T18: explicit task; value stays `Not Found` until the human states it at the T18 gate |
+| Tests for each redaction pattern, empty token, RequestException subclasses, partial payloads, `check` read-error exit 2, KeyboardInterrupt/BrokenPipeError exit 2 | T4 (patterns, empty token), T9 (RequestException subclasses), T10 (partial payloads), T15 (interrupt/pipe), T16 (check read error); see Section 6 |
+
+Assumptions:
+
+| ID | Assumption |
+|---|---|
+| PA-1 | `src/docsync/__init__.py` already defines `__version__ = "0.1.0"` and `pyproject.toml` already declares `docsync.cli:main`, `requests>=2.32.0`, pytest/ruff config and coverage config (read from the repository). T1 and T11 reuse them and do not change the version. |
+| PA-2 | A stub `src/docsync/collectors/__init__.py` already exists but the architecture (C-4) specifies a single `collect.py`. The plan builds `collect.py` and leaves the stub untouched; whether to remove it is Not Found (needs human decision, see Section 8). |
+| PA-3 | Document schema version (A-7, OQ-4): T1 defines `SCHEMA_VERSION = "1"` as a plan-level decision, to be confirmed by the human at the step 4 gate. Tool version comes from `docsync.__version__`. |
+| PA-4 | Perf fixture size for NFR-1: `Not Found` until fixed in T18. Not invented here. |
+| PA-5 | Test code is not counted toward the ~40-line production limit; test files are listed in Files touched. |
+| PA-6 | Estimates are planning estimates for one implementer including tests; they are not measured data. |
+| PA-7 | Each EC test name contains its EC id (NFR-4), e.g. `test_ec_2_api_404_degrades`. |
+
+## 2. Task Table
+
+| ID | Task | Files touched | Satisfies (FR/EC/ADD IDs) | Blocked by | Est. (min) | Done criteria |
+|---|---|---|---|---|---|---|
+| T1 | Domain errors, `NOT_FOUND` sentinel, `FieldValue`, frozen `ProjectFacts`, `SCHEMA_VERSION`; add autouse no-network fixture in `tests/conftest.py` | `src/docsync/errors.py`, `src/docsync/model.py`, `tests/conftest.py`, `tests/test_model.py` | FR-3, FR-13, FR-19, ADD-7, NFR-7 | none | 25 | `NOT_FOUND == "Not Found"` exactly; `DocsyncError`, `UsageError`, `CollectError`, `GitHubError` exist with base class; `ProjectFacts` is frozen and has no timestamp/hash field; no `Field` class (ADD-7); autouse fixture makes `requests.Session.request` raise; `pytest -q` and `ruff check .` clean |
+| T2 | Add `.gitattributes` with `docs/PROJECT_DOCS.md text eol=lf` | `.gitattributes` | ADD-4, ADD-3, FR-17 | none | 10 | File exists at repo root and contains exactly that rule; `git check-attr eol docs/PROJECT_DOCS.md` output pasted showing `eol: lf`; no other file touched |
+| T3 | `redact(text, secrets=())` core: literal secrets (longest first, empty/whitespace ignored), token prefixes `ghp_ gho_ ghu_ ghs_ ghr_ github_pat_`, placeholder `[REDACTED]` | `src/docsync/redact.py`, `tests/test_redact.py` | FR-6, EC-9, NFR-10, ADD-1 | T1 | 25 | Pure function, reads no environment (DR-2); tests: one test per prefix (6), literal secret replaced, longest-first ordering, empty-token and whitespace-token cases leave text unchanged (DR-1); `ruff` clean |
+| T4 | Extend `redact`: `Authorization:` header values, `Bearer <value>`, URL userinfo `scheme://user:pass@host`, `key=value`/`key: value` with token/secret/password/passwd/key/credential; fix pattern order; idempotency | `src/docsync/redact.py`, `tests/test_redact.py` | FR-6, FR-20, EC-9, NFR-10, ADD-1 | T3 | 35 | One test per pattern (header, Bearer, URL userinfo, key=value for each of the 6 key words); `redact(redact(x)) == redact(x)` test; same input gives same output; pattern order matches architecture Section 7; `test_redaction_applied_to_file_and_console` is deferred to T14 (needs CLI) |
+| T5 | `collect.py` part 1: read `pyproject.toml` via `tomllib` into overview, identity (`version`, `requires_python`, `license`, `authors` names, declaration order), dependencies, optional dependencies, entry points; missing and malformed handling | `src/docsync/collect.py`, `tests/test_collect.py` | FR-3, FR-7, FR-14, EC-7, EC-8, EC-13, ADD-3, ADD-8 | T1 | 35 | Missing file gives `Not Found` fields, no warning (EC-7); `TOMLDecodeError` gives `Not Found` plus one warning (EC-13); unreadable file (`OSError`/`UnicodeDecodeError`) gives one warning (EC-8); dependencies and optional groups sorted by code point; only `pyproject.toml` opened; `ruff` clean |
+| T6 | `collect.py` part 2: module scan, relative POSIX paths, Section 11 skip list, no symlinked dirs, `src/` preferred else repo root | `src/docsync/collect.py`, `tests/test_collect.py` | FR-3, EC-6, EC-8, ADD-3, ADD-8 | T5 | 30 | Tests with `tmp_path`: skip list names (`.git`, `tests`, `venv`, `build`, `node_modules`, `*.egg-info`, etc.) excluded; symlinked dir not followed; output sorted by code point; empty repo gives empty tuple; `src/` used when present |
+| T7 | `collect.py` part 3: static test summary via `ast` (files and `test_*` functions incl. class methods, async), `SyntaxError` file counted plus one warning; public `collect(repo) -> (facts_parts, warnings)` assembling all-default facts for an empty repo | `src/docsync/collect.py`, `tests/test_collect.py` | FR-3, FR-7, FR-13, EC-6, EC-8, ADD-8 | T6 | 35 | Counts correct for module-level, method, async cases; `SyntaxError` file counted as a file with 0 functions and one warning; `test_dotenv_never_opened` patches `open`/`Path.read_text` and asserts `.env` never touched (FR-7); `test_ec_6_empty_repo` returns complete default facts |
+| T8 | `github.py` part 1: `fetch(github_repo, offline, token, session)` decision logic only; offline when `--offline`, token unset, or repo omitted; all six hosted keys `Not Found` | `src/docsync/github.py`, `tests/test_github.py` (with `FakeSession`) | FR-9, FR-10, EC-5, EC-14, ADD-2 | T1 | 25 | Zero `session.get` calls in the three offline conditions; `--offline` wins even if token set (A-5); hosted dict has exactly the six FR-4 keys; empty/whitespace token treated as unset (DR-1/DR-2 alignment); `FakeSession` helper defined (about 15 lines, test code) |
+| T9 | `github.py` part 2: single GET to hard-coded `https://api.github.com/repos/{owner}/{name}`, `Authorization: Bearer`, `timeout=5`, no retry; catch `requests.RequestException`, non-2xx, `ValueError`, non-dict payload; one fixed-text warning, no exception text echoed | `src/docsync/github.py`, `tests/test_github.py` | FR-8, FR-11, FR-12, EC-1, EC-2, EC-3, EC-4, ADD-2, ADD-5 | T8 | 35 | Tests: exactly one call, `timeout == 5`, bearer header present, URL host fixed; `Timeout`, `ConnectionError`, `SSLError`, `TooManyRedirects` each give one warning and six `Not Found` (RequestException subclasses, condition 3); 404 (EC-2), 403 (EC-3), invalid JSON (EC-4), JSON list payload each one warning; token value never in warning text or logs (set/not set only); mocked-timeout test supports NFR-2 |
+| T10 | `github.py` part 3: per-field extraction of the six fields; `license` from nested object, `topics` sorted by code point; individual missing/null/empty/wrong-type field gives only that field `Not Found`, no warning | `src/docsync/github.py`, `tests/test_github.py` | FR-3, FR-4, EC-4, ADD-3, ADD-5 | T9 | 30 | Tests: full valid payload gives six fields; `license: null`, missing keys, empty topics, wrong types give per-field `Not Found` with zero warnings (partial payloads, condition 3); topics returned sorted; extra API fields (stars, forks, pushed_at) never appear |
+| T11 | `render.py` part 1: normalisation helper (CR/LF to space, whitespace collapse, `\|` escape), section 1 Overview, 2 Identity, 3 Hosted, 7 Generation Info (`__version__`, `SCHEMA_VERSION` only) | `src/docsync/render.py`, `tests/test_render.py` | FR-2, FR-3, FR-5, ADD-3 | T1 | 35 | Fed hand-built `ProjectFacts`; `Not Found` rendered for sentinel; newline/CR/pipe in a description cannot alter structure; Generation Info has no timestamp or hash (`test_generation_info_has_no_volatile_values`); `ruff` clean |
+| T12 | `render.py` part 2: sections 4 Modules & Entry Points, 5 Dependencies, 6 Test Suite Summary; `render(facts)` emits exactly 7 sections in order, LF, exactly one trailing `\n`; empty collections render `Not Found` | `src/docsync/render.py`, `tests/test_render.py` | FR-2, FR-3, FR-13, FR-17, EC-6, ADD-3 | T11 | 35 | `test_document_has_seven_sections_in_order`; `test_unresolved_fields_render_not_found`; all-default facts render a full 7-section document (EC-6); no `\r` in output; render called twice gives identical string |
+| T13 | `cli.py` part 1: argparse with `generate`/`check` subparsers and flags `--repo --out --github-repo --offline --verbose`; `error()` override exits 2; validation of `--repo` (EC-10) and `--github-repo` strict pattern with `.`/`..` rejected (EC-11); `UsageError` messages passed through `redact` | `src/docsync/cli.py`, `tests/test_cli.py` | FR-18, FR-19, EC-10, EC-11, ADD-1, ADD-2 | T1, T4 | 30 | `test_flags_and_defaults`; missing subcommand gives exit 2; non-existent `--repo` and file-as-`--repo` give one-line message, exit 2, no traceback (EC-10); `a`, `a/b/c`, `../x`, `./.`, `o/..` and query characters rejected (EC-11); `--help` works |
+| T14 | `cli.py` part 2: `generate` orchestration (collect, token from `DOCSYNC_GITHUB_TOKEN` passed on, fetch, build facts, render, `redact(text, secrets=(token,))`, byte-mode write with parent dirs, stdout `wrote <path>`, warnings to stderr, `--verbose` diagnostics redacted, only set/not set logged) | `src/docsync/cli.py`, `tests/test_cli.py` | FR-1, FR-6, FR-8, FR-10, FR-13, FR-20, ADD-1, ADD-9 | T4, T7, T10, T12, T13 | 40 | `test_generate_writes_default_output`; `test_offline_flag_makes_no_requests`; `test_redaction_applied_to_file_and_console` (secret in pyproject description absent from file and capsys); `test_verbose_output_is_redacted`; token value never in stdout/stderr (only set/not set); written bytes are LF, UTF-8, relative `--out` resolved against cwd (ADD-9) |
+| T15 | `cli.py` part 3: top-level handler in `main`: `DocsyncError`, `OSError`, `KeyboardInterrupt`, `BrokenPipeError`, final `except Exception` all map to exit 2 with one-line message and no traceback; add `__main__.py` | `src/docsync/cli.py`, `src/docsync/__main__.py`, `tests/test_cli.py` | FR-19, NFR-9, ADD-6 | T14 | 30 | `test_invalid_input_exit_2_no_traceback`; injected `KeyboardInterrupt` and `BrokenPipeError` each return exit 2 with no traceback in output; write failure at `--out` (for example `--out` is a directory) gives exit 2; generic exception shows type name only under `--verbose`; `python -m docsync --help` runs (output pasted); no bare `except:` |
+| T16 | `cli.py` part 4: `check` mode: regenerate in memory with same config, compare bytes to `--out`, exit 0 identical, 1 drift; only `FileNotFoundError` is drift; other read `OSError` exit 2; never writes; drift hint line | `src/docsync/cli.py`, `tests/test_cli.py` | FR-15, FR-16, EC-12, ADD-6, ADD-10 | T15 | 30 | `test_check_in_sync_and_drift_exit_codes`; `test_ec_12_check_missing_file_is_drift` exit 1; `test_check_read_error_exit_2` (`--out` is a directory) exit 2, not 1 (condition 3); `test_check_does_not_write` (file mtime/bytes and directory listing unchanged); stdout is `drift detected: run "docsync generate" to update <path>` and no diff |
+| T17 | Integration tests only (no production code): double-run determinism, empty repo end to end, Windows-style/CRLF description input, check after generate, full sections on a realistic fixture | `tests/test_cli.py`, `tests/test_integration.py` | FR-13, FR-17, NFR-8, EC-6, ADD-3 | T16 | 35 | `test_generate_twice_is_byte_identical` (0 differing bytes); `test_empty_repo_produces_full_document`; generate then check returns 0; no absolute paths or `\\` separators in output; failures here that point to production code are fixed in the owning task's files, not by new features |
+| T18 | Fix the NFR-1 perf fixture size and add `test_offline_under_1s` | `tests/test_perf.py` | NFR-1, FR-10 | T16, human decision | 20 | Fixture size recorded in this plan as `Not Found` until the human states it at the T18 gate; the implementer must not choose a number on its own (A-3, DR-12). After the human supplies it: the value is written into Section 7 of this plan and the test uses `time.perf_counter` with assertion `< 1.0` s; measured time pasted |
+| T19 | Quality gates and verification inputs: run `ruff check .`, `pytest -q`, `pytest --cov=src/docsync --cov-fail-under=85`, confirm NFR-4 EC-to-test naming and NFR-5 dependencies | none (fixes land in owning task files) | NFR-3, NFR-4, NFR-5, NFR-6, NFR-7, NFR-9 | T2, T17, T18 | 20 | Pasted command output: ruff 0 findings; all tests pass; coverage >= 85%; every EC-1..EC-14 has at least one test name containing its id (grep output pasted); `pyproject.toml` runtime dependencies are only `requests`; exit codes only 0/1/2 asserted by tests |
+
+Requirement coverage check. FR-1 T14; FR-2 T11, T12; FR-3 T1, T5, T6, T7, T10, T11, T12; FR-4 T10; FR-5 T11; FR-6 T3, T4, T14; FR-7 T5, T7; FR-8 T9, T14; FR-9 T8; FR-10 T8, T14; FR-11 T9; FR-12 T9; FR-13 T1, T7, T12, T14, T17; FR-14 T5; FR-15 T16; FR-16 T16; FR-17 T2, T12, T17; FR-18 T13; FR-19 T1, T13, T15; FR-20 T4, T14. EC-1 T9; EC-2 T9; EC-3 T9; EC-4 T9, T10; EC-5 T8; EC-6 T6, T7, T12, T17; EC-7 T5; EC-8 T5, T6, T7; EC-9 T3, T4; EC-10 T13; EC-11 T13; EC-12 T16; EC-13 T5; EC-14 T8. Unmapped FR/EC: none.
+
+## 3. Dependency Graph
+
+```mermaid
+flowchart LR
+    T1 --> T3
+    T3 --> T4
+    T1 --> T5
+    T5 --> T6
+    T6 --> T7
+    T1 --> T8
+    T8 --> T9
+    T9 --> T10
+    T1 --> T11
+    T11 --> T12
+    T1 --> T13
+    T4 --> T13
+    T4 --> T14
+    T7 --> T14
+    T10 --> T14
+    T12 --> T14
+    T13 --> T14
+    T14 --> T15
+    T15 --> T16
+    T16 --> T17
+    T16 --> T18
+    H[Human: perf fixture size] --> T18
+    T2 --> T19
+    T17 --> T19
+    T18 --> T19
+```
+
+The graph is acyclic: every edge goes from a lower-numbered task to a higher-numbered one (the human decision node H is an external input, not a task).
+
+## 4. Blocked Tasks
+
+| Task | Blocked by | What unblocks it |
+|---|---|---|
+| T3 | T1 | T1 merged and approved (`errors.py`, `conftest.py` exist) |
+| T4 | T3 | T3 approved (redact core and its tests pass) |
+| T5 | T1 | T1 approved (`NOT_FOUND`, `ProjectFacts`) |
+| T6 | T5 | T5 approved (`collect.py` exists) |
+| T7 | T6 | T6 approved (module scan exists) |
+| T8 | T1 | T1 approved |
+| T9 | T8 | T8 approved (`fetch` decision logic, `FakeSession`) |
+| T10 | T9 | T9 approved (HTTP path and failure handling) |
+| T11 | T1 | T1 approved (model and sentinel) |
+| T12 | T11 | T11 approved (normaliser, sections 1 to 3, 7) |
+| T13 | T1, T4 | T1 and T4 approved (errors, full redaction set) |
+| T14 | T4, T7, T10, T12, T13 | All five approved: redactor, collector, GitHub client, renderer, CLI arg layer all present |
+| T15 | T14 | T14 approved (`generate` works end to end) |
+| T16 | T15 | T15 approved (`generate` works and exit-code handler is in place; `check` only after `generate`) |
+| T17 | T16 | T16 approved (both subcommands exist) |
+| T18 | T16, human decision | T16 approved AND the human states the perf fixture size at the gate; until then the value is `Not Found` |
+| T19 | T2, T17, T18 | `.gitattributes` in place, integration tests pass, perf test exists |
+
+T1 and T2 have no blockers and can start immediately.
+
+## 5. Critical Path
+
+Durations are the Est. column. Path: T1 (25) -> T5 (35) -> T6 (30) -> T7 (35) -> T14 (40) -> T15 (30) -> T16 (30) -> T17 (35) -> T19 (20) = 280 minutes.
+
+Comparison of the parallel branches reaching T14: collector branch 125 min (T1, T5, T6, T7), GitHub branch 115 min (T1, T8, T9, T10), redact+CLI-args branch 115 min (T1, T3, T4, T13), render branch 95 min (T1, T11, T12). The collector branch is longest, so it sets the path. T18 (20 min, after T16) runs in parallel with T17 but must also finish before T19; it can slip beyond this path if the human decision on fixture size is late. Under CLAUDE.md rule 7 the work is serialised one task at a time anyway, so the real elapsed total is the 560-minute sum plus gates.
+
+## 6. Test Plan Mapping
+
+| Test file | Covers task IDs | Covers EC IDs |
+|---|---|---|
+| `tests/conftest.py` (autouse no-network fixture, shared helpers) | T1 | none (supports NFR-7 for every EC test) |
+| `tests/test_model.py` | T1 | EC-6 (defaults exist) |
+| `tests/test_redact.py` (each prefix, header, Bearer, URL userinfo, key=value keys, empty and whitespace token, idempotency) | T3, T4 | EC-9 |
+| `tests/test_collect.py` | T5, T6, T7 | EC-6, EC-7, EC-8, EC-13 |
+| `tests/test_github.py` (FakeSession; RequestException subclasses; partial payloads) | T8, T9, T10 | EC-1, EC-2, EC-3, EC-4, EC-5, EC-14 |
+| `tests/test_render.py` | T11, T12 | EC-6 |
+| `tests/test_cli.py` (flags, validation, generate, redaction on file and console, verbose, KeyboardInterrupt/BrokenPipeError exit 2, check exit codes, check read-error exit 2, no-write) | T13, T14, T15, T16 | EC-10, EC-11, EC-12, EC-9 (console), EC-5, EC-14 (end to end offline) |
+| `tests/test_integration.py` | T17 | EC-6, EC-12 |
+| `tests/test_perf.py` | T18 | none (NFR-1; fixture size `Not Found` until fixed) |
+| Command checks (no test file): `ruff check .`, coverage gate, EC naming grep, `git check-attr` | T2, T19 | none |
+
+Binding condition 3 checklist: each redaction pattern (T4, T3), empty token (T3, T8), RequestException subclasses (T9), partial JSON payloads (T10), `check` read-error exit 2 (T16), KeyboardInterrupt/BrokenPipeError exit 2 (T15).
+
+## 7. Risks and Rollback
+
+| Risk | Affected tasks | Response if a task fails |
+|---|---|---|
+| A task's tests cannot go green | Any | Revert that task's changes only (`git restore` of its files; one commit per task keeps this atomic), do not start the next task, report to the human |
+| A task exceeds ~40 lines of production code | Any | Stop and split it into a new numbered sub-task, update this plan, get approval; never batch |
+| Redaction over- or under-matches and breaks determinism | T4, T14 | Roll back T4 patterns to T3 core, add the failing sample as a test, fix the pattern; accept false positives over leaks (design review residual risk) |
+| `requests` behaviour differs from the fake session | T9 | Keep the fake aligned with `requests.Response` attributes actually used (`status_code`, `json()`); no real network calls to compare (NFR-7) |
+| Per-phase timeout can exceed 5 s wall clock (DR-5) | T9, T19 | Not fixed by design (FR-12 mandates the value); report measured online timing in step 7 |
+| False drift from CRLF on Windows | T2, T16, T17 | If T2 does not give `eol: lf`, stop and report; do not weaken the byte-compare |
+| Perf fixture size not provided | T18 | T18 stays blocked and the value stays `Not Found`; T19 may be run with T18 reported as open, never with an invented number |
+| Existing `collectors/` stub conflicts with `collect.py` | T5 | If import ambiguity appears, stop and ask the human (PA-2); do not delete files unprompted |
+| Coverage below 85% at T19 | T19 | Add tests in the owning task's test file for the uncovered lines; no coverage-ignore pragmas without approval |
+| Rollback of T14 or later after dependents exist | T14 to T17 | Revert in reverse order (latest first) |
+
+## 8. Out of Plan
+
+| Excluded item | Reason |
+|---|---|
+| Choosing the NFR-1 fixture size | Not derivable (A-3, DR-12); human decision at T18 gate; value `Not Found` until then |
+| Removing the `src/docsync/collectors/` stub | Not authorised by any requirement; needs human decision (PA-2) |
+| Diff output on drift | Rejected in DR-10 (ADD-10) |
+| Inferring `--github-repo` from git remotes, any `.git` access | Rejected in DR-11 (ADD-10) |
+| Hard wall-clock deadline for HTTP | Not required; FR-12 fixes `timeout=5`; documented residual risk (DR-5) |
+| Retry logic, caching, pagination, volatile GitHub fields (stars, forks, issues, push time) | Out of scope per FR-4, FR-12, FR-5 and requirements Section 1 |
+| Non-Python projects, non-GitHub platforms, multi-repo runs, publishing docs, editing hand-written prose | Out of scope per requirements Section 1 |
+| Running tests of the target repo, `pytest --collect-only` | Rejected in architecture Section 5 (speed, determinism, safety) |
+| Writing `docs/PROJECT_DOCS.md`, `CHANGELOG.md`, code review, verification report, PR | Belong to steps 6 to 8 |
+| Reading or writing `.env`, keys, credentials | Forbidden by CLAUDE.md rule 6; `.env.example` is not touched by this plan |
+| Test-only dependencies (`responses`, `requests-mock`) | Would need approval (architecture Section 5); a hand-written fake is used |
+
+---
+**Gate:** Approve step 4 and continue? (yes / changes needed)
