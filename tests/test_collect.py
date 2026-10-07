@@ -1,12 +1,25 @@
 """Tests for docsync.collect (T5: pyproject.toml reading)."""
 
 import builtins
+import os
+import tempfile
 from pathlib import Path
 
 import pytest
 
 from docsync.collect import collect, collect_pyproject, scan_modules
 from docsync.model import NOT_FOUND, ProjectFacts
+
+
+def _symlinks_available() -> bool:
+    """Probe whether this environment may create directory symlinks."""
+    with tempfile.TemporaryDirectory() as tmp:
+        try:
+            os.symlink(tmp, os.path.join(tmp, "probe"), target_is_directory=True)
+        except (OSError, NotImplementedError):
+            return False
+    return True
+
 
 _FULL = """
 [project]
@@ -257,13 +270,18 @@ def test_scan_modules_skip_list_applies_inside_src(tmp_path: Path) -> None:
     assert modules == ("src/pkg/d.py",)
 
 
+@pytest.mark.skipif(
+    not _symlinks_available(),
+    reason=(
+        "EL-1: directory symlink creation is not permitted in this environment "
+        "(Windows needs elevated privileges or Developer Mode); "
+        "see docs/04-impl-plan.md section 10 Environment Limitations"
+    ),
+)
 def test_scan_modules_symlinked_directory_is_not_followed(tmp_path: Path) -> None:
     # Arrange
     _touch(tmp_path, "real/z.py")
-    try:
-        (tmp_path / "link").symlink_to(tmp_path / "real", target_is_directory=True)
-    except (OSError, NotImplementedError):
-        pytest.skip("symlinks not available on this platform")
+    (tmp_path / "link").symlink_to(tmp_path / "real", target_is_directory=True)
 
     # Act
     modules = scan_modules(tmp_path)
