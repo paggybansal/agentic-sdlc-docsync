@@ -1,4 +1,4 @@
-"""Tests for docsync.cli (T13/T13b: parsing and validation, T14: generate, T15: errors)."""
+"""Tests for docsync.cli (T13-T16: parsing, generate, error handling, check)."""
 
 import ast
 import os
@@ -768,3 +768,220 @@ def test_no_bare_except_in_source() -> None:
 
     # Act / Assert
     assert bare == []
+
+
+_DRIFT = 'drift detected: run "docsync generate" to update docs/PROJECT_DOCS.md\n'
+
+
+def _snapshot(root: Path) -> dict[str, tuple[bytes, int]]:
+    """Every file under root with its bytes and mtime, to prove nothing changed."""
+    return {
+        p.relative_to(root).as_posix(): (p.read_bytes(), p.stat().st_mtime_ns)
+        for p in sorted(root.rglob("*"))
+        if p.is_file()
+    }
+
+
+def test_check_in_sync_and_drift_exit_codes(
+    repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Arrange
+    main(["generate"])
+    capsys.readouterr()
+
+    # Act
+    in_sync = main(["check"])
+    in_sync_out = capsys.readouterr().out
+    out_file = repo / "docs" / "PROJECT_DOCS.md"
+    out_file.write_bytes(out_file.read_bytes() + b"edited by hand\n")
+    drift = main(["check"])
+
+    # Assert
+    assert in_sync == 0
+    assert in_sync_out == "in sync\n"
+    assert drift == 1
+    assert capsys.readouterr().out == _DRIFT
+
+
+def test_ec_12_check_missing_file_is_drift(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    # Arrange: no generate was run, so docs/PROJECT_DOCS.md does not exist
+
+    # Act
+    code = main(["check"])
+
+    # Assert
+    assert code == 1
+    assert capsys.readouterr().out == _DRIFT
+
+
+def test_check_missing_parent_directory_is_drift(repo: Path) -> None:
+    # Arrange / Act
+    code = main(["check", "--out", "no/such/dir/o.md"])
+
+    # Assert
+    assert code == 1
+
+
+def test_check_read_error_exit_2(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    # Arrange: --out is a directory, so reading it is an error, not drift
+    (repo / "out.md").mkdir()
+
+    # Act
+    code = main(["check", "--out", "out.md"])
+
+    # Assert
+    assert code == 2
+    assert "I/O error" in _assert_one_line_error(capsys)
+
+
+def test_check_does_not_write_when_file_is_missing(repo: Path) -> None:
+    # Arrange
+    before = _snapshot(repo)
+
+    # Act
+    main(["check"])
+
+    # Assert
+    assert not (repo / "docs").exists()
+    assert _snapshot(repo) == before
+
+
+def test_check_does_not_write_when_file_has_drifted(repo: Path) -> None:
+    # Arrange
+    (repo / "docs").mkdir()
+    (repo / "docs" / "PROJECT_DOCS.md").write_bytes(b"stale\n")
+    before = _snapshot(repo)
+
+    # Act
+    code = main(["check"])
+
+    # Assert
+    assert code == 1
+    assert _snapshot(repo) == before
+
+
+def test_check_does_not_write_when_in_sync(repo: Path) -> None:
+    # Arrange
+    main(["generate"])
+    before = _snapshot(repo)
+
+    # Act
+    code = main(["check"])
+
+    # Assert
+    assert code == 0
+    assert _snapshot(repo) == before
+
+
+def test_check_drift_prints_hint_and_no_diff(
+    repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Arrange
+    (repo / "docs").mkdir()
+    (repo / "docs" / "PROJECT_DOCS.md").write_bytes(b"stale\n")
+
+    # Act
+    main(["check"])
+
+    # Assert
+    assert capsys.readouterr().out.splitlines() == [_DRIFT.strip()]
+
+
+def test_check_crlf_copy_of_the_document_is_drift(repo: Path) -> None:
+    # Arrange
+    main(["generate"])
+    out_file = repo / "docs" / "PROJECT_DOCS.md"
+    out_file.write_bytes(out_file.read_bytes().replace(b"\n", b"\r\n"))
+
+    # Act
+    code = main(["check"])
+
+    # Assert
+    assert code == 1
+
+
+def test_check_detects_a_change_in_the_repository(repo: Path) -> None:
+    # Arrange
+    main(["generate"])
+    (repo / "pyproject.toml").write_text(_PYPROJECT.replace("demo", "renamed"), encoding="utf-8")
+
+    # Act
+    code = main(["check"])
+
+    # Assert
+    assert code == 1
+
+
+def test_check_uses_the_same_hosted_configuration_as_generate(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Arrange
+    monkeypatch.setenv("DOCSYNC_GITHUB_TOKEN", _SECRET_ENV)
+    argv = ["--github-repo", "octo/demo"]
+    main(["generate", *argv], _Session(_Response(200, _PAYLOAD)))
+
+    # Act
+    same = main(["check", *argv], _Session(_Response(200, _PAYLOAD)))
+    changed = main(["check", *argv], _Session(_Response(200, {**_PAYLOAD, "topics": ["z"]})))
+
+    # Assert
+    assert same == 0
+    assert changed == 1
+
+
+def test_check_offline_flag_makes_no_requests(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Arrange
+    monkeypatch.setenv("DOCSYNC_GITHUB_TOKEN", _SECRET_ENV)
+    session = _Session()
+
+    # Act
+    main(["check", "--github-repo", "octo/demo", "--offline"], session)
+
+    # Assert
+    assert session.calls == []
+
+
+def test_check_degraded_run_still_exits_0_and_warns_on_stderr(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Arrange
+    monkeypatch.setenv("DOCSYNC_GITHUB_TOKEN", _SECRET_ENV)
+    argv = ["--github-repo", "octo/demo"]
+    main(["generate", *argv], _Session(_Response(404)))
+    capsys.readouterr()
+
+    # Act
+    code = main(["check", *argv], _Session(_Response(404)))
+
+    # Assert
+    captured = capsys.readouterr()
+    assert code == 0
+    assert "warning: GitHub lookup failed" in captured.err
+    assert captured.out == "in sync\n"
+
+
+def test_check_output_is_redacted(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    # Arrange
+    out = f"{_TOKEN_SHAPED}.md"
+
+    # Act
+    code = main(["check", "--out", out])
+
+    # Assert
+    captured = capsys.readouterr()
+    assert code == 1
+    assert _TOKEN_SHAPED not in captured.out + captured.err
+    assert "[REDACTED]" in captured.out
+
+
+def test_no_not_implemented_error_remains_in_source() -> None:
+    # Arrange
+    src = Path(__file__).resolve().parents[1] / "src" / "docsync"
+
+    # Act
+    offenders = [
+        path.name for path in src.rglob("*.py") if "NotImplementedError" in path.read_text("utf-8")
+    ]
+
+    # Assert
+    assert offenders == []

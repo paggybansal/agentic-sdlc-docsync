@@ -81,8 +81,10 @@ def _emit(message: str, token: str | None, *, err: bool = False) -> None:
     print(redact(message, secrets=(token or "",)), file=sys.stderr if err else sys.stdout)
 
 
-def _generate(args: CliArgs, session: HttpSession | None) -> int:
-    token = os.environ.get("DOCSYNC_GITHUB_TOKEN")
+def _document(
+    args: CliArgs, session: HttpSession | None, token: str | None
+) -> tuple[str, tuple[str, ...]]:
+    """Build the redacted document text and its warnings (shared by generate and check)."""
     if args.verbose:
         state = "set" if token and token.strip() else "not set"
         for line in (f"repo: {args.repo}", f"out: {args.out}", f"DOCSYNC_GITHUB_TOKEN is {state}"):
@@ -90,13 +92,29 @@ def _generate(args: CliArgs, session: HttpSession | None) -> int:
     parts, warnings = collect(args.repo)
     hosted, hosted_warnings = fetch(args.github_repo, args.offline, token, session)
     facts = ProjectFacts(hosted=hosted, warnings=(*warnings, *hosted_warnings), **parts)
-    text = redact(render(facts), secrets=(token or "",))
-    args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_bytes(text.encode("utf-8"))
-    for warning in facts.warnings:
+    return redact(render(facts), secrets=(token or "",)), facts.warnings
+
+
+def _run(args: CliArgs, session: HttpSession | None) -> int:
+    """Run ``generate`` (write the file) or ``check`` (compare bytes, never write)."""
+    token = os.environ.get("DOCSYNC_GITHUB_TOKEN")
+    text, warnings = _document(args, session, token)
+    data, shown = text.encode("utf-8"), args.out.as_posix()
+    if args.command == "generate":
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_bytes(data)
+        result, code = f"wrote {shown}", 0
+    else:
+        try:
+            in_sync = args.out.read_bytes() == data
+        except FileNotFoundError:
+            in_sync = False
+        drift = f'drift detected: run "docsync generate" to update {shown}'
+        result, code = ("in sync", 0) if in_sync else (drift, 1)
+    for warning in warnings:
         _emit(f"warning: {warning}", token, err=True)
-    _emit(f"wrote {args.out.as_posix()}", token)
-    return 0
+    _emit(result, token)
+    return code
 
 
 def _fail(message: str) -> int:
@@ -115,10 +133,7 @@ def main(argv: Sequence[str] | None = None, session: HttpSession | None = None) 
     try:
         args = parse_args(argv)
         verbose = args.verbose
-        if args.command == "generate":
-            return _generate(args, session)
-        # TEMPORARY loud guard: removed by T16 (check); must not survive step 5.
-        raise NotImplementedError("check is implemented in task T16")
+        return _run(args, session)
     except KeyboardInterrupt:
         return _fail("interrupted")
     except BrokenPipeError:
