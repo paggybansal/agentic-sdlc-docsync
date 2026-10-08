@@ -13,9 +13,9 @@
 
 | Item | Value |
 |---|---|
-| Task count | 20 (T1 to T19 plus T13b, added at the T13 gate); 18 production-code tasks, T18 and T19 are verification tasks |
+| Task count | 21 (T1 to T19 plus T13b, added at the T13 gate, and T20, added after the step 6 review); 19 production-code tasks, T18 and T19 are verification tasks |
 | Size rule | Each production task is at most ~40 lines of production code; its tests are part of the same task (Done criteria) |
-| Total estimate | 580 minutes if done sequentially by one implementer (560 plus 20 for T13b); critical path 280 minutes (Section 5) |
+| Total estimate | 580 minutes if done sequentially by one implementer (560 plus 20 for T13b; T20 was not estimated by the human, so its estimate is `Not Found`); critical path 280 minutes (Section 5) |
 | Step 5 rule | One task at a time, stop for human approval after each (CLAUDE.md rule 7) |
 
 Build order rationale (matches the mandated order): errors/model/sentinel (T1) -> redactor (T3, T4) and collectors (T5 to T7, T8 to T10) -> renderer (T11, T12) -> CLI (T13 to T15) -> `check` mode (T16, only after `generate` works end to end in T14/T15) -> integration, perf and quality gates (T17 to T19). Redaction is built early because the CLI (T13) echoes user input through it (ADD-1). `.gitattributes` (T2) has no code dependency and satisfies the step 3 condition for ADD-4.
@@ -64,8 +64,11 @@ Assumptions:
 | T17 | Integration tests only (no production code): double-run determinism, empty repo end to end, Windows-style/CRLF description input, check after generate, full sections on a realistic fixture | `tests/test_cli.py`, `tests/test_integration.py` | FR-13, FR-17, NFR-8, EC-6, ADD-3 | T16 | 35 | `test_generate_twice_is_byte_identical` (0 differing bytes); `test_empty_repo_produces_full_document`; generate then check returns 0; no absolute paths or `\\` separators in output; failures here that point to production code are fixed in the owning task's files, not by new features |
 | T18 | Add `test_offline_under_1s` to the RO-1 specification (Section 9) and register the `perf` pytest marker | `tests/test_perf.py`, `pyproject.toml` (marker registration only; added at the T17 gate) | NFR-1, FR-10 | T16 | 20 | Fixture and method exactly as RO-1; `@pytest.mark.perf` registered in `[tool.pytest.ini_options] markers`; in-process generate, one discarded warm-up, 3 measured runs, best (minimum) by `time.perf_counter`; offline forced (token unset and `--offline`); no network and no subprocess; asserts best run < 2.0 s and prints the measured best duration against the 1.0 s target; `ruff check .` clean; full suite green |
 | T19 | Quality gates and verification inputs: run `ruff check .`, `pytest -q`, `pytest --cov=src/docsync --cov-fail-under=85`, confirm NFR-4 EC-to-test naming and NFR-5 dependencies | none (fixes land in owning task files) | NFR-3, NFR-4, NFR-5, NFR-6, NFR-7, NFR-9 | T2, T17, T18 | 20 | Pasted command output: ruff 0 findings; all tests pass; coverage >= 85%; every EC-1..EC-14 has at least one test name containing its id (grep output pasted); `pyproject.toml` runtime dependencies are only `requests`; exit codes only 0/1/2 asserted by tests |
+| T20 | Harden the redactor (fixes CR-1, CR-2 and CR-3 from `docs/05-code-review.md`). Every regex quantifier explicitly bounded (no open-ended `+`, `*` or `{n,}`), no nested or ambiguous quantifiers, all patterns compiled once at import into a module-level tuple. Full pattern set of the secret-safety skill: `sk-` keys, `ghp_`, `github_pat_`, other `gh[pousr]_` tokens, AWS `AKIA` key ids, Slack `xox[baprs]-`, JWT `eyJ...`, PEM private-key header and body, and a bounded base64 blob redacted only if it contains an uppercase letter, a lowercase letter and a digit. The key=value rule is rewritten (CR-3). `cli.py` stays the single redaction choke point and `render.py` must not call the redactor | `src/docsync/redact.py`, `tests/test_redact.py`, `tests/test_integration.py` (the end-to-end choke-point test only) | CR-1, CR-2, CR-3, FR-6, FR-20, EC-9, NFR-10, ADD-1 | T4, T19 | Not Found | Tests: (a) one positive test per pattern class; (b) a ReDoS regression test on pathological 20,000-character inputs, each call under 1.0 s by `time.perf_counter`, marked `@pytest.mark.perf`; (c) false-positive tests that must NOT be redacted: a long dependency-list line, a 64-character SHA-256 hex string, a long lowercase-only string, a long module path, a normal sentence, `keygen = 1`, `keyring=abc`, `API key: rotate it`, `key = value`; (d) must be redacted: a genuine mixed-case base64 blob, `api_key=ghp_<token>`, a token-shaped assignment of 20+ characters; (e) idempotency: redacting redacted text is a no-op; (f) a structural test that every quantifier in every compiled pattern is bounded; (g) an end-to-end test: a fixture repo whose pyproject description contains token-shaped strings, run generate, assert on the file bytes on disk and on captured stdout and stderr, not on an internal call; (h) a source test that only `cli.py` imports the redactor. `ruff check .` clean, full suite green, hook passes |
 
 Requirement coverage check. FR-1 T14; FR-2 T11, T12; FR-3 T1, T5, T6, T7, T10, T11, T12; FR-4 T10; FR-5 T11; FR-6 T3, T4, T14; FR-7 T5, T7; FR-8 T9, T14; FR-9 T8; FR-10 T8, T14; FR-11 T9; FR-12 T9; FR-13 T1, T7, T12, T14, T17; FR-14 T5; FR-15 T16; FR-16 T16; FR-17 T2, T12, T17; FR-18 T13; FR-19 T1, T13, T15; FR-20 T4, T14. EC-1 T9; EC-2 T9; EC-3 T9; EC-4 T9, T10; EC-5 T8; EC-6 T6, T7, T12, T17; EC-7 T5; EC-8 T5, T6, T7; EC-9 T3, T4; EC-10 T13; EC-11 T13; EC-12 T16; EC-13 T5; EC-14 T8. Unmapped FR/EC: none.
+
+T20 note (step 6 follow-up): the original T20 task text named `src/docsync/sanitizer.py` and `tests/test_sanitizer.py`; this was corrected by the human to `src/docsync/redact.py` and `tests/test_redact.py` (decision RO-2 in Section 9), because the codebase and docs/02-architecture.md are authoritative and a second redaction module would duplicate the single redaction function.
 
 Size deviation note (step 5): T13 delivered about 45 lines of production code against the plan's "~40"; accepted at the T13 gate because the parts are tightly coupled.
 
@@ -99,6 +102,8 @@ flowchart LR
     T2 --> T19
     T17 --> T19
     T18 --> T19
+    T4 --> T20
+    T19 --> T20
 ```
 
 The graph is acyclic: every edge goes from a lower-numbered task to a higher-numbered one (the perf fixture decision RO-1 is recorded in Section 9 and is no longer a node).
@@ -125,6 +130,7 @@ The graph is acyclic: every edge goes from a lower-numbered task to a higher-num
 | T17 | T16 | T16 approved (both subcommands exist) |
 | T18 | T16 | T16 approved (the fixture size was supplied as RO-1) |
 | T19 | T2, T17, T18 | `.gitattributes` in place, integration tests pass, perf test exists |
+| T20 | T4, T19 | T4 approved (`redact` exists) and T19 approved (step 5 baseline and the step 6 review that raised CR-1 to CR-3) |
 
 T1 and T2 have no blockers and can start immediately.
 
@@ -140,12 +146,12 @@ Comparison of the parallel branches reaching T14: collector branch 125 min (T1, 
 |---|---|---|
 | `tests/conftest.py` (autouse no-network fixture, shared helpers) | T1 | none (supports NFR-7 for every EC test) |
 | `tests/test_model.py` | T1 | EC-6 (defaults exist) |
-| `tests/test_redact.py` (each prefix, header, Bearer, URL userinfo, key=value keys, empty and whitespace token, idempotency) | T3, T4 | EC-9 |
+| `tests/test_redact.py` (each prefix, header, Bearer, URL userinfo, key=value keys, empty and whitespace token, idempotency; T20: bounded quantifiers, every pattern class, ReDoS regression, false positives) | T3, T4, T20 | EC-9 |
 | `tests/test_collect.py` | T5, T6, T7 | EC-6, EC-7, EC-8, EC-13 |
 | `tests/test_github.py` (FakeSession; RequestException subclasses; partial payloads) | T8, T9, T10 | EC-1, EC-2, EC-3, EC-4, EC-5, EC-14 |
 | `tests/test_render.py` | T11, T12 | EC-6 |
 | `tests/test_cli.py` (flags, validation, generate, redaction on file and console, verbose, KeyboardInterrupt/BrokenPipeError exit 2, check exit codes, check read-error exit 2, no-write) | T13, T13b, T14, T15, T16 | EC-10, EC-11, EC-12, EC-9 (console), EC-5, EC-14 (end to end offline) |
-| `tests/test_integration.py` | T17 | EC-6, EC-12 |
+| `tests/test_integration.py` | T17, T20 (end-to-end choke-point test) | EC-6, EC-9, EC-12 |
 | `tests/test_perf.py` | T18 | none (NFR-1; fixture per RO-1) |
 | Command checks (no test file): `ruff check .`, coverage gate, EC naming grep, `git check-attr` | T2, T19 | none |
 
@@ -188,6 +194,8 @@ Binding condition 3 checklist: each redaction pattern (T4, T3), empty token (T3,
 | ID | Open item | Decision (given by the human at the step 5 T17 gate) | Applied in |
 |---|---|---|---|
 | RO-1 | NFR-1 performance fixture size and measurement method (A-3, DR-12, OQ-5, PA-4) | Fixture, built in `tmp_path`, offline only, no network, no subprocess: 50 Python modules (5 packages x 10 modules, about 10 lines each); 20 test files with 2 test functions each; `pyproject.toml` declaring 30 runtime dependencies and 5 optional dependencies; a README.md and a LICENSE file. Method: call the generate path in-process (no subprocess, to exclude interpreter startup); one discarded warm-up call; then 3 measured calls with `time.perf_counter`, best (minimum) duration counts; offline forced explicitly (token unset via `monkeypatch.delenv` and `--offline`). Budget: target best run < 1.0 s; test assertion (hard fail) best run < 2.0 s; the test prints the measured best duration so step 7 can quote it. The test carries `@pytest.mark.perf`, registered in `pyproject.toml` because pytest runs with `--strict-markers`; the marker is for selection only and the test stays in the default run | T18; docs/01-requirements.md NFR-1 and Q16 |
+| RO-2 | T20 scope after the step 6 review (CR-1, CR-2, CR-3, CR-5): file names, redaction choke point, base64 blob rule, key=value false positives, placeholder | Decided by the human on 2026-10-08. (1) Harden `src/docsync/redact.py` and `tests/test_redact.py` in place; do not create `sanitizer.py` (the original T20 text named the wrong files). (2) `cli.py` remains the single redaction choke point and `render.py` must not call the redactor; an end-to-end test must prove it by asserting on the written file and on captured output; the secret-safety skill was corrected to say so. (3) A bounded base64 blob is redacted only if it contains at least one uppercase letter, one lowercase letter and one digit, a heuristic chosen because the committed document makes a missed secret permanent while a false positive is cosmetic and reversible; tests: a 64-character SHA-256 hex string and a lowercase-only long string are NOT redacted, a mixed-case blob IS. (4) CR-3 is in scope because it shares the key=value regex that must be rewritten for CR-1: `keygen = 1`, `keyring=abc`, `API key: rotate it` and `key = value` are NOT redacted; `api_key=ghp_<token>` and a token-shaped assignment of 20+ characters ARE. (5) CR-5 is resolved by aligning the secret-safety skill to the implemented and architecturally documented placeholder `[REDACTED]`; no code or test is changed for it | T20; `.claude/skills/secret-safety/SKILL.md` (commit `2cfa41a`) |
+| RO-3 | CR-4: the default `--out` depended on the current working directory | Decided by the human on 2026-10-08: change the behaviour, not the documentation. Without `--out` the default is `<repo>/docs/PROJECT_DOCS.md`, independent of the cwd; an explicit `--out` resolves against the cwd and keeps the `.md` and inside-`--repo` validation | `src/docsync/cli.py` and `tests/test_cli.py` (commit `546f4b1`); docs/01 FR-1 and FR-18, docs/02 section 9, README Usage (commit `675750f`) |
 
 ## 10. Environment Limitations
 
