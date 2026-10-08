@@ -2,6 +2,7 @@
 
 import ast
 import hashlib
+import random
 import re
 import time
 from pathlib import Path
@@ -520,6 +521,14 @@ _PATHOLOGICAL = {
     "unterminated quote": 'password="' + "a" * 20000,
     "dots and slashes": "a.b/" * 5000,
     "equals run": "key" + "=" * 20000,
+    "suffixed key repeats": "password_" * 2200,
+    "key then dashes": "secret" + "-a" * 9000 + "=",
+    "quotes then keyword": '"' * 20000 + "password",
+    "table cell repeats": "| secret |" * 2000,
+    "sk prefix with digits": "sk-" + "a1" * 9000,
+    "quoted key repeats": "token\"\"\"=" * 2500,
+    "slash separated words": "Ab1/" * 5000,
+    "slashes only": "a/" * 10000,
 }
 
 
@@ -631,3 +640,214 @@ def test_only_the_cli_module_imports_the_redactor() -> None:
 
     # Act / Assert
     assert importers == {"cli.py"}
+
+
+# --- T21a: more key shapes (CR-17), structured text survives (CR-19), idempotency (CR-22) ------
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ('{"password": "hunter2"}', '{"password": [REDACTED]}'),
+        ('"token": "abc123"', '"token": [REDACTED]'),
+        ("'token': 'abc123'", "'token': [REDACTED]"),
+        ('{"secret":"x","other":1}', '{"secret":[REDACTED],"other":1}'),
+    ],
+    ids=["json-double", "yaml-double", "single-quoted", "compact-json"],
+)
+def test_cr_17_quoted_key_shapes_are_replaced(text: str, expected: str) -> None:
+    # Arrange / Act
+    result = redact(text)
+
+    # Assert
+    assert result == expected
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("passwords=hunter2", "passwords=[REDACTED]"),
+        ("secrets: hunter2", "secrets: [REDACTED]"),
+        ("SECRET_KEY=abc123", "SECRET_KEY=[REDACTED]"),
+        ("client_secret_key = abc", "client_secret_key = [REDACTED]"),
+        ("db.password_hash: x1", "db.password_hash: [REDACTED]"),
+    ],
+    ids=["plural", "plural-colon", "upper-suffix", "long-suffix", "dotted"],
+)
+def test_cr_17_plural_and_suffixed_key_shapes_are_replaced(text: str, expected: str) -> None:
+    # Arrange / Act
+    result = redact(text)
+
+    # Assert
+    assert result == expected
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("| password | hunter2 |", "| password | [REDACTED] |"),
+        ("|  Token  |  s3cr3t value  |", "|  Token  |  [REDACTED]  |"),
+        ("| CREDENTIAL | abc |", "| CREDENTIAL | [REDACTED] |"),
+    ],
+    ids=["plain", "padded", "uppercase"],
+)
+def test_cr_17_key_and_value_in_separate_table_cells_are_replaced(text: str, expected: str) -> None:
+    # Arrange / Act
+    result = redact(text)
+
+    # Assert
+    assert result == expected
+
+
+def test_cr_17_table_rule_needs_the_cell_to_be_exactly_a_key_name() -> None:
+    # Arrange
+    text = "| Optional (secret) | pytest |\n| Secret-sauce | tasty |"
+
+    # Act
+    result = redact(text)
+
+    # Assert
+    assert result == text
+
+
+def test_cr_17_quoted_weak_key_with_a_token_shaped_value_is_replaced() -> None:
+    # Arrange
+    text = '{"api_key": "A1b2C3d4E5f6G7h8I9j0K1"}'
+
+    # Act
+    result = redact(text)
+
+    # Assert
+    assert result == '{"api_key": [REDACTED]}'
+
+
+def test_cr_17_json_structure_around_a_redacted_value_is_preserved() -> None:
+    # Arrange
+    text = '{"name": "demo", "password": "hunter2"}'
+
+    # Act
+    result = redact(text)
+
+    # Assert
+    assert result == '{"name": "demo", "password": [REDACTED]}'
+
+
+@pytest.mark.parametrize("name", ["tokenizer", "secretary", "keyboard", "keygen", "monkey"])
+def test_cr_17_words_that_merely_contain_a_key_name_are_not_keys(name: str) -> None:
+    # Arrange
+    text = f"{name} = fast"
+
+    # Act
+    result = redact(text)
+
+    # Assert
+    assert result == text
+
+
+_STRUCTURED_TEXT = [
+    "https://github.com/parag-bansal/agentic-sdlc-docsync",
+    "https://api.github.com/repos/octocat/Hello-World",
+    "octocat/Hello-World",
+    "MIT",
+    "Apache-2.0",
+    "src/docsync/collectors/github_api.py",
+    "GPL-3.0-or-later",
+    "machine-learning",
+    "pkg @ git+https://github.com/Org/Repo.git@v1.2.3",
+    "https://github.com/SomeOrganisationName/VeryLongRepositoryName1234567890",
+    "https://example.com/Docs/UserGuide/Chapter2/Installation/WindowsSetup/Details",
+    "src/docsync/SomeVeryLongPackageNameWithMixedCase123/AnotherLongDirectoryName456/file.py",
+    "sk-learn-extension-package-name",
+    "scikit-learn-extension-package-with-a-long-name",
+]
+
+
+@pytest.mark.parametrize("text", _STRUCTURED_TEXT, ids=lambda s: s[:30])
+def test_cr_19_structured_non_secret_text_survives_byte_identical(text: str) -> None:
+    # Arrange / Act
+    result = redact(text)
+
+    # Assert
+    assert result == text
+
+
+def test_cr_19_real_sk_key_with_digits_is_still_replaced() -> None:
+    # Arrange / Act
+    result = redact("key sk-proj1234567890abcdefgh end")
+
+    # Assert
+    assert result == f"key {PLACEHOLDER} end"
+
+
+def test_cr_19_aws_secret_access_key_is_not_mistaken_for_a_path() -> None:
+    # Arrange: three "/" segments, two of them 8+ letters, but about half upper case
+    text = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+
+    # Act
+    result = redact(text)
+
+    # Assert
+    assert result == PLACEHOLDER
+
+
+def test_cr_19_base64_secret_with_slashes_is_still_replaced() -> None:
+    # Arrange
+    text = "Zm9vYmFy/QmF6UXV4MTIz/NDU2Nzg5MEFC/Q0RFRkdISUpL"
+
+    # Act
+    result = redact(text)
+
+    # Assert
+    assert result == PLACEHOLDER
+
+
+def test_cr_22_quoted_value_followed_by_a_tail_is_replaced_in_one_pass() -> None:
+    # Arrange
+    text = 'password="abc"def'
+
+    # Act
+    once = redact(text)
+
+    # Assert
+    assert once == "password=[REDACTED]"
+    assert redact(once) == once
+
+
+_DELIMITED_PIECES = [
+    "password", "token", "secret", "secret_key", "passwords", "key", "api_key", "credential",
+    "=", ":", " = ", '"', "'", '"abc"', "'x y'", "abc", "hunter2", "x", ",", "|", "}", "]", ")",
+    "{",
+    "ghp_A1b2C3d4E5f6G7h8I9j0K1", "AKIAIOSFODNN7EXAMPLE", "sk-ant-api03-abcdefghijklmnop1234",
+    "sk-learn-extension-package-name", "Authorization:", "Bearer ", "Bearer abcdefgh12345678",
+    "https://", "user:pw@", "host.com", "/", "git+https://", "a/b/c", "[REDACTED]",
+    "Zm9vYmFyQmF6UXV4MTIzNDU2Nzg5MEFCQ0RFRkdISUpLTE1O", "-----BEGIN PRIVATE KEY-----",
+    "SomeVeryLongPackageNameWithMixedCase123", "src/pkg/", '{"token": "x"}',
+]
+
+
+def test_cr_22_redaction_is_idempotent_on_delimited_input_by_seeded_fuzz() -> None:
+    # Arrange: 20,000 strings built from secret shapes, quotes and separators, joined by spaces
+    rng = random.Random(20261008)
+    failures = []
+
+    # Act
+    for _ in range(20000):
+        text = " ".join(rng.choice(_DELIMITED_PIECES) for _ in range(rng.randint(2, 8)))
+        once = redact(text)
+        if redact(once) != once:
+            failures.append(text)
+
+    # Assert
+    assert failures == []
+
+
+def test_cr_22_idempotency_is_not_claimed_for_secrets_glued_together_without_a_delimiter() -> None:
+    # Arrange: replacing the first secret changes the character the second one is anchored to
+    text = "AKIAIOSFODNN7EXAMPLEsk-ant-api03-abcdefghijklmnop1234"
+
+    # Act
+    once = redact(text)
+
+    # Assert: documented limitation, not a requirement; the first pass still hides the AWS key
+    assert "AKIA" not in once
+    assert redact(once) != once
