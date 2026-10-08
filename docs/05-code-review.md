@@ -649,13 +649,62 @@ No row is `Fail` (7.2: Pass 1, Pass with comment 6), and there is no Blocker or 
 
 This verdict supersedes section 6; section 6 is retained unchanged as the original record.
 
+### 7.7 Final remediation round (T21), remediation freeze and deferred findings
+
+Appended after the re-review verdict (7.6); sections 1 to 7.6 are unchanged. This subsection records the author's evidence for T21 (commits `167d039` plan, `4bd4fb8` CLAUDE.md rule 9, `f837f74` T21a, and the commit that carries this subsection for T21b and T21c). It is **not** a new independent review: the verdict in 7.6 was issued at `9e52a1d`, and `src/docsync/redact.py` changed afterwards in `f837f74`.
+
+**Remediation freeze (decision RO-4).** T21 is the final remediation round for step 6. After T21 is approved, no further code or documentation remediation happens in step 6. Every remaining finding is disclosed as a Known Limitation in step 7 and step 8 and must reappear verbatim in the Known Limitations sections of docs/06-verification.md and docs/07-pr-description.md. Only a High severity security or correctness defect may reopen the freeze, and only after the human is asked explicitly.
+
+#### 7.7.1 Findings fixed in T21
+
+| CR id | Status | Evidence | Notes |
+|---|---|---|---|
+| CR-17 | Resolved | `redact.py:62` (`_STRONG_KEY`: plural, separated suffix, optional quote), `redact.py:63` (`_VALUE`), `redact.py:91`, table rule at `redact.py:97`; tests `test_redact.py:658` (quoted keys), `:677` (plural and suffixed), `:694` (separate table cells), `:713` (quoted bare `key`) | Every new pattern is bounded and compiled at module level; `test_redact.py:591` fails on any unbounded quantifier |
+| CR-19 | Resolved for URLs, repository names, topics, licence identifiers, paths and `sk-` package names | `redact.py:16` (`_redact_sk_key`: digit required), `redact.py:22` and `:29` (path-like runs), `redact.py:37`; tests `test_redact.py:766` (14 strings that must survive byte-identical, including the six named in T21) and `:782` | A regression was caught before commit: the first path heuristic skipped the AWS example secret `wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY`; it was tightened and has its own test. Residual: long camel-case identifiers, see CR-29 |
+| CR-22 | Resolved by a wording change plus a partial fix (the chosen option) | docstring `redact.py:107`; tests `test_redact.py:804` (`password="abc"def` is replaced in one pass), `:828` (20,000 seeded delimited strings, 0 failures), `:844` (the glued-secrets limitation is stated, not hidden); docs/02-architecture.md:154 | Chosen because exact idempotency cannot be proven for arbitrary input. Measured with a grammar fuzz of 150,000 strings per seed (seeds 99, 7, 2026): T20 code 0.38%, 0.41%, 0.38% non-idempotent; T21a code 0.11%, 0.14%, 0.13%; 0 of 150,000 when the pieces are space-delimited. The remaining cases are secrets pasted together with no delimiter (CR-31) |
+| CR-23 | Resolved | docs/02-architecture.md:154 rewritten; revision row 1.3 added | Document stated: docs/02-architecture.md section 7. False claims: only `gh*_` prefixes, Authorization, Bearer, `user:pass@` and "key contains token/secret/password/passwd/key/credential"; "output is idempotent". Correction: the real pattern set, order, bounds, strong and weak key rules, blob heuristic, and the qualified idempotency statement |
+| CR-24 | Resolved | `.claude/skills/secret-safety/SKILL.md:32` (`gh[pousr]_` with the underscore), `:35` (JWT form), `:42` (the list is illustrative; `redact.py` is authoritative and bounded), `:50` (verification line) | Document stated: the secret-safety skill. False claims: `gh[pousr]` without the underscore, the JWT pattern with an unescaped dot and one segment, and "no matches" for the verification grep. The unbounded `{n,}` forms are kept as illustration and declared non-authoritative |
+| CR-25 | Resolved | docs/01-requirements.md:113 (Q6 annotated), docs/04-impl-plan.md:60 (T13b row marked superseded for the default) | Document stated: Q6 and the T13b row. False claim: the default `--out` resolves against the cwd. Correction: annotations that point to CR-4 and RO-3; the historical record is kept, not rewritten |
+| CR-28 | Resolved (T21c) | CLAUDE.md golden rule 9, commit `4bd4fb8`; section 8 below corrected | New finding, severity Minor, process defect: artifact dates were assumed or taken from the human's instructions instead of git. The initial review's `Date` was recorded as 2026-10-07 but `git log -1 --format=%cs 03a965c` gives 2026-10-08. Section 8 row 1.0 is corrected. **Section 1 of this document still shows 2026-10-07**: it is the frozen original record and is deliberately not rewritten; this entry is the correction by appending. Dates in docs/01 to docs/04 were checked against their first git commits and match |
+
+Not fixed in T21b, and why. T21b fixes only statements where a document contradicts the implemented code. Left unchanged: the planned acceptance-test names in docs/01 that differ from the implemented names (CR-14: naming, traceability by id is intact); the historical task descriptions of T3 and T4 in docs/04 (a record of what each task did at the time); the README Quick start, whose code fence is never closed and swallows a pasted PR template (a formatting defect, not a contradiction with the code); and any wording that is merely incomplete or stylistic.
+
+#### 7.7.2 Deferred findings: disclosed as Known Limitations
+
+Status for every row: **Deferred, disclosed as Known Limitation.** Severity is as recorded in section 3 or 7.4 (or here for the new ids). These rows must reappear verbatim in the Known Limitations sections of docs/06-verification.md and docs/07-pr-description.md.
+
+| CR id | Severity | Finding (short) | Justification for deferral |
+|---|---|---|---|
+| CR-7 | Minor | Duplicated helpers (`_text`, `_license`, string-list helpers, the token and env expressions in `cli.py`) | Behaviour is correct and tested; consolidating touches three modules after the freeze |
+| CR-8 | Minor | An undecodable test file is reported as a "syntax error" | The count and exit code are right; only the warning wording is imprecise |
+| CR-9 | Info | Empty `collectors/` stub; `CollectError` and `GitHubError` are never raised | PA-2 awaits a human decision; no behaviour impact |
+| CR-10 | Minor | Weak tests (test doubles, source-grep tests, one multi-assert test, `__main__.py` at 0% line coverage) | Behaviour is guarded by other tests; strengthening is quality work, not a defect fix |
+| CR-11 | Info | EL-1 (symlink test skipped), EL-2 (NTFS ordering) and EL-3 (no live API test) | Environment limits, disclosed by design in docs/04 section 10 |
+| CR-12 | Minor | `--out` residuals: `CON.md`, `.git/x.md` and overwriting an existing in-repo `.md` such as `README.md` are accepted | Inside `--repo` and `.md` only, so not a traversal; a stricter rule needs a policy decision |
+| CR-13 | Info | The final `except Exception` carries `# noqa: BLE001` (already Accepted in section 3) | Mandated by FR-19 |
+| CR-14 | Info | Some planned test names in docs/01 differ from the implemented names | Traceability by requirement id is intact |
+| CR-15 | Info | `tests/test_cli.py` is very large and repeats a fake-token literal | Split when next touched |
+| CR-16 | Info | Secret-scan matches are deliberate fake fixtures and the detection regex (already Accepted) | No real credential exists in the repository |
+| CR-18 | Minor | The strong-key rule redacts ordinary prose such as `the password: required` | Accepted trade-off: a missed secret in a committed document is permanent, a false positive is cosmetic (RO-2) |
+| CR-20 | Minor | Base64 runs over 4,096 characters leave a final fragment under 40 characters; base64url is not covered; long PEM bodies leave a tail | Far beyond the sizes of generated metadata; the bounds are what keep the work linear |
+| CR-21 | Minor | URL userinfo residuals (`p@ss`, a `/` inside a password) | Rare in committed metadata; widening the rule risks the bounded-time guarantee |
+| CR-26 | Info | A very short literal secret corrupts other text | Needs a one-character token; unrealistic (freeze rule) |
+| CR-27 | Info | The 13 rules in `_RULES` are unnamed | Readability only (freeze rule) |
+| CR-29 | Info | New: a long camel-case identifier of 40 or more characters containing a digit is redacted by the blob heuristic | Cannot be separated from random base64 by entropy (measured: identifiers 4.2 to 4.4 bits, random base64 4.3 and above); excluding it would miss real secrets |
+| CR-30 | Minor | New: the widened key rules redact configuration names and table headers: `max_tokens = 4096` becomes `max_tokens = [REDACTED]`, and a header cell pair `| Secret | Description |` becomes `| Secret | [REDACTED] |` | Cosmetic and reversible; plural and suffixed key names are exactly what CR-17 asked to catch |
+| CR-31 | Info | New: secrets pasted together with no delimiter are not idempotent (`AKIA...EXAMPLEsk-ant-...`), because replacing the first changes the character the second one is anchored to | Measured at 0.11% to 0.14% of structured fuzz strings and 0 of 150,000 when delimited; the first pass already hides both |
+| CR-32 | Info | New: the path-like heuristic can skip a random base64 secret that has several long mostly lower-case segments | Measured: 3 of 159,922 random mixed-case base64 secrets (0.002%) were skipped |
+| CR-33 | Info | New: an `sk-` key whose body contains no digit is not redacted | Needed to spare names such as `sk-learn-extension`; about 0.3% of random 32-character alphanumeric bodies have no digit |
+| CR-34 | Info | New: an unquoted secret value that contains `}` is redacted only up to the brace | The brace stop keeps JSON structure intact and the output idempotent |
+
 ## 8. Revision History
 
 | Version | Date | Event | Commit(s) | Notes |
 |---|---|---|---|---|
-| 1.0 | 2026-10-07 | Initial review | 03a965c | Verdict `Changes requested`; blocking CR-1 and CR-2; CR-1 to CR-16 recorded. The reviewed commit was 18aa32b (2026-10-07); the review document itself was committed as 03a965c, which `git log` dates 2026-10-08 |
+| 1.0 | 2026-10-08 | Initial review | 03a965c | Verdict `Changes requested`; blocking CR-1 and CR-2; CR-1 to CR-16 recorded. The reviewed commit was 18aa32b (2026-10-07); the review document itself was committed as 03a965c, which `git log` dates 2026-10-08. T21c: the Date column was corrected from 2026-10-07, which came from the human's instructions and not from git, to the value of `git log -1 --format=%cs 03a965c` |
 | 1.1 | 2026-10-08 | Remediation | CR-4: 546f4b1, 675750f; skill alignment (CR-5): 2cfa41a; plan amendment: 0446e96; T20: 9e52a1d | CR-4 fixed by changing the behaviour (RO-3); T20 rewrote `src/docsync/redact.py` (CR-1, CR-2, CR-3); CR-5 resolved by aligning the secret-safety skill to the implemented and architecturally documented placeholder |
-| 1.2 | 2026-10-08 | Re-review | reviewing 9e52a1d | Verdict `Approved`; CR-1 to CR-6 Resolved or Accepted; new findings CR-17 to CR-27 (Minor and Info) |
+| 1.2 | 2026-10-08 | Re-review | re-review committed as d8fb7de, reviewing 9e52a1d | Verdict `Approved`; CR-1 to CR-6 Resolved or Accepted; new findings CR-17 to CR-27 (Minor and Info) |
+| 1.3 | 2026-10-08 | Final remediation (T21) | Plan: 167d039; CLAUDE.md rule 9: 4bd4fb8; T21a: f837f74; T21b and T21c: the commit that carries this row | CR-17, CR-19, CR-22, CR-23, CR-24, CR-25 and CR-28 resolved; CR-7 to CR-16, CR-18, CR-20, CR-21, CR-26, CR-27 and CR-29 to CR-34 deferred as Known Limitations (7.7.2); remediation freeze (RO-4) in force. Not a new independent review (7.7) |
 
 ---
 **Gate:** Approve step 6 and continue? (yes / changes needed)

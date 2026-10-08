@@ -110,7 +110,7 @@
 | Q3 | How is the platform API authenticated? | Optional bearer token from env var `DOCSYNC_GITHUB_TOKEN` only; unauthenticated requests allowed; unset variable means offline mode. | FR-8, FR-9, EC-5 |
 | Q4 | Which GitHub fields are included? | Only `full_name`, `description`, `default_branch`, `visibility`, `license`, `topics`. Volatile fields excluded for AC7. | FR-4 |
 | Q5 | What goes in Generation Info? | Tool version and document schema version only; no timestamp, no commit hash. | FR-5 |
-| Q6 | Exact CLI shape? | `docsync generate` and `docsync check`; flags `--repo PATH` (default `.`), `--out PATH` (default `docs/PROJECT_DOCS.md`), `--github-repo OWNER/NAME` (optional), `--offline`, `--verbose`. | FR-1, FR-18 |
+| Q6 | Exact CLI shape? | `docsync generate` and `docsync check`; flags `--repo PATH` (default `.`), `--out PATH` (default `docs/PROJECT_DOCS.md`, resolved against the `--repo` root since CR-4; see FR-1 and FR-18), `--github-repo OWNER/NAME` (optional), `--offline`, `--verbose`. | FR-1, FR-18 |
 | Q7 | Exit codes? | 0 success / in sync; 1 drift detected by `check`; 2 invalid input or usage error; never leak a traceback. | FR-15, FR-19, NFR-9 |
 | Q8 | Behaviour when the API fails? | One warning line to stderr, affected fields `Not Found`, continue, exit 0. | FR-11, EC-1..EC-4 |
 | Q9 | Behaviour on an empty repository? | Complete valid document with all 7 sections, unresolved fields `Not Found`, exit 0. | FR-13, EC-6 |
