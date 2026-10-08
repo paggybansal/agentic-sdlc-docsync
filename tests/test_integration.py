@@ -280,3 +280,37 @@ def test_crlf_sources_and_tests_are_counted_correctly(
     document = _document(tmp_path).decode("utf-8")
     assert code == 0
     assert "| Test Functions | 2 |" in document
+
+
+def test_ec_9_choke_point_holds_end_to_end_for_token_shaped_values(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Arrange: secrets reach the document through the description and a VCS dependency, and the
+    # console through a warning that names a test file
+    github = "ghp_A1b2C3d4E5f6G7h8I9j0K1L2M3N4O5P6Q7R8"
+    aws = "AKIAIOSFODNN7EXAMPLE"
+    anthropic = "sk-ant-api03-abcdefghijklmnop1234"
+    password = "s3cr3tpassw0rd"
+    monkeypatch.delenv("DOCSYNC_GITHUB_TOKEN", raising=False)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "pyproject.toml").write_text(
+        f'[project]\nname = "leaky"\ndescription = "uses {github}, {aws} and {anthropic}"\n'
+        f'dependencies = ["pkg @ git+https://deploy:{password}@example.com/org/pkg.git"]\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / f"test_{github}.py").write_text("def test_x(:\n", encoding="utf-8")
+
+    # Act
+    code = main(["generate", "--offline"])
+
+    # Assert: on the bytes written to disk and on captured console output
+    written = _document(tmp_path).decode("utf-8")
+    console = capsys.readouterr()
+    assert code == 0
+    for secret in (github, aws, anthropic, password):
+        assert secret not in written
+        assert secret not in console.out + console.err
+    assert "[REDACTED]" in written
+    assert "git+https://[REDACTED]@example.com/org/pkg.git" in written
+    assert "[REDACTED]" in console.err
