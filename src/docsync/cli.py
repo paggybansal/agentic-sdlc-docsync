@@ -17,6 +17,7 @@ from docsync.redact import redact
 from docsync.render import render
 
 _GITHUB_REPO = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
+_DEFAULT_OUT = Path("docs") / "PROJECT_DOCS.md"
 
 
 @dataclass(frozen=True)
@@ -40,7 +41,9 @@ def build_parser() -> argparse.ArgumentParser:
     """Build the ``docsync generate|check`` parser; usage errors raise ``UsageError``."""
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--repo", default=".", help="repository root to document")
-    common.add_argument("--out", default="docs/PROJECT_DOCS.md", help="output file")
+    common.add_argument(
+        "--out", default=None, help="output file (default: <repo>/docs/PROJECT_DOCS.md)"
+    )
     common.add_argument("--github-repo", default=None, help="OWNER/NAME for hosted metadata")
     common.add_argument("--offline", action="store_true", help="make no network calls")
     common.add_argument("--verbose", action="store_true", help="extra diagnostics on stderr")
@@ -58,7 +61,7 @@ def _valid_github_repo(value: str) -> bool:
 
 
 def _check_out(repo: Path, out: Path) -> None:
-    """``--out`` must be a ``.md`` file inside ``--repo`` (a relative path is cwd-based)."""
+    """``--out`` must be a ``.md`` file inside ``--repo`` (explicit relative paths use the cwd)."""
     if out.suffix.lower() != ".md":
         raise UsageError(f"--out must end in .md, got {str(out)!r}")
     if not out.resolve().is_relative_to(repo.resolve()):
@@ -70,10 +73,12 @@ def parse_args(argv: Sequence[str] | None = None) -> CliArgs:
     ns = build_parser().parse_args(argv)
     if not Path(ns.repo).is_dir():
         raise UsageError(f"--repo is not an existing directory: {ns.repo!r}")
-    _check_out(Path(ns.repo), Path(ns.out))
+    repo = Path(ns.repo)
+    out = Path(ns.out) if ns.out is not None else repo / _DEFAULT_OUT
+    _check_out(repo, out)
     if ns.github_repo is not None and not _valid_github_repo(ns.github_repo):
         raise UsageError(f"--github-repo must look like OWNER/NAME, got {ns.github_repo!r}")
-    return CliArgs(ns.command, Path(ns.repo), Path(ns.out), ns.github_repo, ns.offline, ns.verbose)
+    return CliArgs(ns.command, repo, out, ns.github_repo, ns.offline, ns.verbose)
 
 
 def _emit(message: str, token: str | None, *, err: bool = False) -> None:

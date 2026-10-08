@@ -528,10 +528,79 @@ def test_out_in_sibling_directory_sharing_the_repo_name_prefix_is_rejected(
         parse_args(["generate", "--repo", str(repo), "--out", str(sibling / "x.md")])
 
 
-def test_default_out_is_rejected_when_cwd_is_outside_repo(
+def test_default_out_with_cwd_outside_repo_resolves_against_the_repo_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # Arrange
+    repo = tmp_path / "r"
+    elsewhere = tmp_path / "elsewhere"
+    repo.mkdir()
+    elsewhere.mkdir()
+    (repo / "pyproject.toml").write_text(_PYPROJECT, encoding="utf-8")
+    monkeypatch.chdir(elsewhere)
+
+    # Act
+    args = parse_args(["generate", "--repo", str(repo)])
+    code = main(["generate", "--repo", str(repo)])
+
+    # Assert
+    assert args.out == repo / "docs" / "PROJECT_DOCS.md"
+    assert code == 0
+    assert (repo / "docs" / "PROJECT_DOCS.md").is_file()
+    assert not (elsewhere / "docs").exists()
+
+
+def test_default_out_with_cwd_inside_repo_still_resolves_against_the_repo_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Arrange
+    repo = tmp_path / "r"
+    nested = repo / "sub" / "deeper"
+    nested.mkdir(parents=True)
+    (repo / "pyproject.toml").write_text(_PYPROJECT, encoding="utf-8")
+    monkeypatch.chdir(nested)
+
+    # Act
+    code = main(["generate", "--repo", str(repo)])
+
+    # Assert
+    assert code == 0
+    assert (repo / "docs" / "PROJECT_DOCS.md").is_file()
+    assert not (nested / "docs").exists()
+
+
+def test_default_out_with_default_repo_is_relative_docs_path() -> None:
+    # Arrange / Act
+    args = parse_args(["generate"])
+
+    # Assert
+    assert args.repo == Path(".")
+    assert args.out == Path("docs/PROJECT_DOCS.md")
+
+
+def test_explicit_relative_out_from_a_different_cwd_resolves_against_the_cwd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Arrange: the cwd is a subdirectory of the repo; "../o.md" lands in the repo root
+    repo = tmp_path / "r"
+    nested = repo / "sub"
+    nested.mkdir(parents=True)
+    (repo / "pyproject.toml").write_text(_PYPROJECT, encoding="utf-8")
+    monkeypatch.chdir(nested)
+
+    # Act
+    code = main(["generate", "--repo", str(repo), "--out", "../o.md"])
+
+    # Assert
+    assert code == 0
+    assert (repo / "o.md").is_file()
+    assert not (nested / "o.md").exists()
+
+
+def test_explicit_relative_out_resolving_outside_the_repo_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Arrange: the cwd is outside the repo, so a bare relative name lands outside it
     repo = tmp_path / "r"
     elsewhere = tmp_path / "elsewhere"
     repo.mkdir()
@@ -540,7 +609,26 @@ def test_default_out_is_rejected_when_cwd_is_outside_repo(
 
     # Act / Assert
     with pytest.raises(UsageError, match="--out must be inside --repo"):
-        parse_args(["generate", "--repo", str(repo)])
+        parse_args(["generate", "--repo", str(repo), "--out", "o.md"])
+
+
+def test_check_default_out_from_outside_the_repo_compares_the_repo_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Arrange
+    repo = tmp_path / "r"
+    elsewhere = tmp_path / "elsewhere"
+    repo.mkdir()
+    elsewhere.mkdir()
+    (repo / "pyproject.toml").write_text(_PYPROJECT, encoding="utf-8")
+    monkeypatch.chdir(elsewhere)
+    assert main(["generate", "--repo", str(repo)]) == 0
+
+    # Act
+    code = main(["check", "--repo", str(repo)])
+
+    # Assert
+    assert code == 0
 
 
 def test_default_out_is_accepted_when_cwd_is_the_repo() -> None:
