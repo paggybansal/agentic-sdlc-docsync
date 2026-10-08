@@ -179,7 +179,7 @@ docsync check    [--repo PATH] [--out PATH] [--github-repo OWNER/NAME] [--offlin
 | Flag | Default | Meaning |
 |---|---|---|
 | `--repo PATH` | `.` | Repository root to document; must be an existing directory |
-| `--out PATH` | `docs/PROJECT_DOCS.md` | Output file (generate) or committed file to compare (check); a relative `--out` is resolved against the current working directory |
+| `--out PATH` | `<repo>/docs/PROJECT_DOCS.md` | Output file (generate) or committed file to compare (check). When `--out` is **not** supplied the default is resolved against the `--repo` root and never depends on the current working directory. When `--out` **is** supplied, a relative path is resolved against the current working directory (standard CLI behaviour). Either way it must end in `.md` and resolve inside `--repo` (CR-4, T13b) |
 | `--github-repo OWNER/NAME` | none | Enables hosted metadata; omitted means hosted fields `Not Found` |
 | `--offline` | off | No network calls, even if the token is set |
 | `--verbose` | off | Extra diagnostics on stderr (redacted) |
@@ -223,6 +223,7 @@ stdout: short result line (for example "wrote <path>" or "in sync"/"drift detect
 |---|---|---|---|
 | 1.0 | 2026-10-07 | solution-architect | Initial architecture (step 2, commit 2523db4) |
 | 1.1 | 2026-10-07 | design-reviewer | Step 3 review. Applied: DR-1 (redaction patterns, URL userinfo, empty secret), DR-2 (pure `redact` with explicit `secrets`), DR-3 (determinism rules, Section 11, CRLF guard), DR-4 (RequestException, partial payload handling), DR-5 (timeout caveat documented), DR-6 (strict `--github-repo` pattern, hard-coded API base), DR-7 (exit-code hardening, check read errors), DR-8 (removed `Field` wrapper), DR-9 (scan skip list, test counting rules), DR-10 (drift hint, no diff). Not applied: DR-11 (Rejected), DR-12 (Deferred). See docs/03-design-review.md |
+| 1.2 | 2026-10-08 | implementer (step 6 decision) | CR-4: Section 9 `--out` default is now `<repo>/docs/PROJECT_DOCS.md`, resolved against the `--repo` root; an explicit relative `--out` still resolves against the current working directory. Supersedes ADD-9 for the default only |
 
 ---
 **Gate:** Approve step 2 and continue? (yes / changes needed)

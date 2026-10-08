@@ -46,7 +46,7 @@
 
 | ID | Requirement | Source AC | Priority | Acceptance test |
 |----|-------------|-----------|----------|-----------------|
-| FR-1 | The system shall, on `docsync generate`, write a Markdown file to the path given by `--out` (default `docs/PROJECT_DOCS.md`). | AC1 | Must | `tests/test_cli.py::test_generate_writes_default_output` (planned) |
+| FR-1 | The system shall, on `docsync generate`, write a Markdown file to the path given by `--out`; when `--out` is not supplied the default is `docs/PROJECT_DOCS.md` under the `--repo` root, independent of the current working directory. | AC1 | Must | `tests/test_cli.py::test_generate_writes_default_output` (planned) |
 | FR-2 | The system shall emit exactly 7 sections, in this order: Project Overview, Identity & Metadata, Hosted Repository Metadata, Modules & Entry Points, Dependencies, Test Suite Summary, Generation Info. | AC1 | Must | `tests/test_render.py::test_document_has_seven_sections_in_order` (planned) |
 | FR-3 | The system shall render every value it cannot determine as the exact literal `Not Found`, and shall not blank or omit the field. | AC2 | Must | `tests/test_render.py::test_unresolved_fields_render_not_found` (planned) |
 | FR-4 | The system shall include in Hosted Repository Metadata only these fields: `full_name`, `description`, `default_branch`, `visibility`, `license`, `topics`. | AC1, AC7 | Must | `tests/test_github.py::test_only_stable_fields_rendered` (planned) |
@@ -63,7 +63,7 @@
 | FR-15 | The system shall, on `docsync check`, regenerate the document in memory using the same configuration and compare it byte-for-byte to the file at `--out`; it shall exit 0 if identical and 1 if different. | AC6 | Must | `tests/test_cli.py::test_check_in_sync_and_drift_exit_codes` (planned) |
 | FR-16 | The system shall not modify any file during `docsync check`. | AC6 | Must | `tests/test_cli.py::test_check_does_not_write` (planned) |
 | FR-17 | The system shall produce byte-identical output when `docsync generate` is run twice in succession on an unchanged repository (deterministic ordering, fixed line endings, no volatile values). | AC7 | Must | `tests/test_cli.py::test_generate_twice_is_byte_identical` (planned) |
-| FR-18 | The system shall accept the flags `--repo PATH` (default `.`), `--out PATH` (default `docs/PROJECT_DOCS.md`), `--github-repo OWNER/NAME` (optional), `--offline` and `--verbose` on both subcommands. | AC1 | Must | `tests/test_cli.py::test_flags_and_defaults` (planned) |
+| FR-18 | The system shall accept the flags `--repo PATH` (default `.`), `--out PATH` (default `<repo>/docs/PROJECT_DOCS.md`, resolved against the `--repo` root; an explicit relative `--out` is resolved against the current working directory and must end in `.md` and resolve inside `--repo`), `--github-repo OWNER/NAME` (optional), `--offline` and `--verbose` on both subcommands. | AC1 | Must | `tests/test_cli.py::test_flags_and_defaults` (planned) |
 | FR-19 | The system shall exit 2 on invalid input or usage error and shall never display a Python traceback to the user. | AC4 | Must | `tests/test_cli.py::test_invalid_input_exit_2_no_traceback` (planned) |
 | FR-20 | The system shall, when `--verbose` is set, print extra diagnostics to stderr, with the same redaction applied. | AC3 | Should | `tests/test_cli.py::test_verbose_output_is_redacted` (planned) |
 

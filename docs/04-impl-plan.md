@@ -165,7 +165,7 @@ Binding condition 3 checklist: each redaction pattern (T4, T3), empty token (T3,
 | Existing `collectors/` stub conflicts with `collect.py` | T5 | If import ambiguity appears, stop and ask the human (PA-2); do not delete files unprompted |
 | Coverage below 85% at T19 | T19 | Add tests in the owning task's test file for the uncovered lines; no coverage-ignore pragmas without approval |
 | Rollback of T14 or later after dependents exist | T14 to T17 | Revert in reverse order (latest first) |
-| With `--repo` as the root for the `--out` check (T13b), the default `docs/PROJECT_DOCS.md` (resolved against the cwd, ADD-9) is rejected when the cwd is not inside `--repo` | T13b, T14, T17 | Reject with a one-line `UsageError`; the user passes `--out` inside `--repo`. This is a behaviour change relative to ADD-9 to be recorded in steps 7 and 8; do not silently re-base the default on `--repo` |
+| With `--repo` as the root for the `--out` check (T13b), the default `docs/PROJECT_DOCS.md` (resolved against the cwd, ADD-9) was rejected when the cwd was not inside `--repo` | T13b, T14, T17 | **Superseded by the CR-4 decision (step 6, 2026-10-08):** the default is now resolved against the `--repo` root and never depends on the cwd; an explicit relative `--out` still resolves against the cwd and is validated. Code: `cli.py` `parse_args`; docs/01 FR-1 and FR-18, docs/02 section 9 and the README Usage section were updated |
 
 ## 8. Out of Plan
 
