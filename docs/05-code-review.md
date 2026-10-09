@@ -1139,6 +1139,19 @@ Appended after 7.9; nothing above is edited. The human's standing triage rule ap
 
 Status for all three: **Deferred, disclosed as Known Limitation.** None affects the generated document, so V-9 (RO-5) is not engaged. They must reappear verbatim, with severity and justification, in the Known Limitations sections of docs/06-verification.md and docs/07-pr-description.md.
 
+## 7.11 Step 6 closure: CR-35 and CR-38 deferred, Not Found dispositions recorded
+
+Appended after 7.10; nothing above is edited. Step 6 is closed by the human's decision.
+
+| CR id | Severity | Finding | Status | Justification for deferral |
+|---|---|---|---|---|
+| CR-35 | Minor | `sk-` package names such as `sk-learn-extension-package-name` are redacted (a consequence of the human's ruling that a prefix match is sufficient for explicit patterns) | Deferred, disclosed as Known Limitation | A false positive on non-secret text; cosmetic and reversible, and the ruling prefers it to a missed credential |
+| CR-38 | Info | Anchor, case and length residuals for prefixed tokens: `sk-` directly after a letter or digit, upper-case `SK-`, `GHP_` and `XOXB-`, a 15-character `sk-` body, `xoxe-` tokens, an `AKIA` token with extra characters, a token split by a newline. Under the human's later standing triage rule some of these count as security false negatives; the human was told so and chose to defer | Deferred, disclosed as Known Limitation, by the human's explicit decision | The residuals come from anchoring and length bounds, are very rare in repository metadata, and a fix would reopen the redactor under the remediation freeze |
+
+Both rows must reappear verbatim, with severity and justification, in the Known Limitations sections of docs/06-verification.md and docs/07-pr-description.md, together with the deferred register in 7.7.2 (CR-33 excluded, see 7.7.3) and CR-39 to CR-41 (7.10).
+
+Not Found dispositions and the obligations for step 7 are recorded in docs/04-impl-plan.md as RO-5 to RO-11 (commits `2f68a61` and `8cc0ff3`). One item is still pending a human decision: RO-8 (V-10, the manual online run for NFR-2), because with the token unset the tool makes no request (`src/docsync/github.py:90-91`).
+
 ## 8. Revision History
 
 | Version | Date | Event | Commit(s) | Notes |
@@ -1151,6 +1164,7 @@ Status for all three: **Deferred, disclosed as Known Limitation.** None affects 
 | 1.5 | 2026-10-09 | Delta re-review | reviewing 3487008; committed as the commit that carries this row | Independent review of `src/docsync/redact.py` and `tests/test_redact.py` over `9e52a1d..3487008` (Security, Test Coverage, DRY). Closing verdict for step 6: `Approved`; new findings CR-35 to CR-38; CR-36 awaits a human decision (7.7.3). The date is that of the latest commit when the row was written |
 | 1.6 | 2026-10-09 | CR-36 closure | the commit that carries this row (follows c416247) | CR-36 resolved by a documentation correction in docs/02-architecture.md (section 7 and revision row 1.4); no code change. Step 6 closed. The date is that of the latest commit when the row was written |
 | 1.7 | 2026-10-09 | Triage of CR-39 to CR-41 | the commit that carries this row (follows 535233d) | CR-39, CR-40 and CR-41 (Info) auto-deferred under the human's standing triage rule (7.10); no code or generated-document change. The date is that of the latest commit when the row was written |
+| 1.8 | 2026-10-09 | Step 6 closure | the commit that carries this row (follows 8cc0ff3) | CR-35 and CR-38 deferred by the human; Not Found dispositions recorded in docs/04 (RO-5 to RO-11); RO-8 (V-10) pending a human decision. Step 6 closed. The date is that of the latest commit when the row was written |
 
 ---
 **Gate:** Approve step 6 and continue? (yes / changes needed)
