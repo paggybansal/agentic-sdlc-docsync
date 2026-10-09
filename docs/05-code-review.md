@@ -1127,6 +1127,18 @@ Appended after 7.8; nothing above is edited. Recorded the same way as CR-5 (reso
 
 Re-scan after the correction: docs/01 to docs/04 were searched for any other clause that contradicts the post-T22 redactor. No other normative clause was found. Historical task and review records that describe behaviour that was later superseded were reported to the human as candidates and left unchanged, pending the human's decision.
 
+## 7.10 Triage of the candidates from the post-T22 re-scan (CR-39 to CR-41)
+
+Appended after 7.9; nothing above is edited. The human's standing triage rule applies: High severity, any security false negative, or anything that breaks an accepted AC is stopped and brought to the human; Medium that corrupts the generated document in a way V-9 would catch is stopped and brought to the human; everything else is auto-deferred under the remediation freeze and carried verbatim into Known Limitations.
+
+| CR id | Severity | File | Finding | Bucket | Justification for deferral |
+|---|---|---|---|---|---|
+| CR-39 | Info | docs/04-impl-plan.md, T21 row | The goal text of T21a lists "long camel-case identifiers" and "`sk-` package names" among the structured text it would stop mangling; the shipped redactor does neither (CR-29, CR-35) | Auto-deferred: Info, a statement of task intent in a historical record, no code or generated-document effect | The authoritative status of both items is recorded in 7.7.2 (CR-29) and 7.8.6 (CR-35); the plan row records what was intended at the time |
+| CR-40 | Info | docs/04-impl-plan.md, T4 row | The T4 task description says the `key=value` rule applies to `key` among the strong words; the shipped bare-`key` rule needs a token-shaped value of 20 or more characters | Auto-deferred: Info, a historical task description superseded by T20 and T21a | docs/02-architecture.md section 7 (revision 1.4) states the current rules; the T4 row records what T4 did when it was done |
+| CR-41 | Info | docs/03-design-review.md, risk register | The risk example that `key=value` redaction "may over-redact benign text (for example `monkey=...`)" no longer happens: a bare `key` now needs a 20 or more character value | Auto-deferred: Info, a review-time risk example in a historical record; the document is not modified after step 3 | The risk was accepted at step 3 and has since been reduced; no behaviour or deliverable is affected |
+
+Status for all three: **Deferred, disclosed as Known Limitation.** None affects the generated document, so V-9 (RO-5) is not engaged. They must reappear verbatim, with severity and justification, in the Known Limitations sections of docs/06-verification.md and docs/07-pr-description.md.
+
 ## 8. Revision History
 
 | Version | Date | Event | Commit(s) | Notes |
@@ -1138,6 +1150,7 @@ Re-scan after the correction: docs/01 to docs/04 were searched for any other cla
 | 1.4 | 2026-10-09 | Freeze exception (T22) | Plan: 2f68a61 (dated 2026-10-09); T22: 3487008 | CR-33 (High, security false negative) resolved: explicit prefixed credential rules no longer need mixed case or a digit; rules split into `_EXPLICIT_RULES` and `_HEURISTIC_RULES`; real rule count 14; CR-33 removed from the deferred list (7.7.3); RO-5 and RO-6 recorded for step 7 |
 | 1.5 | 2026-10-09 | Delta re-review | reviewing 3487008; committed as the commit that carries this row | Independent review of `src/docsync/redact.py` and `tests/test_redact.py` over `9e52a1d..3487008` (Security, Test Coverage, DRY). Closing verdict for step 6: `Approved`; new findings CR-35 to CR-38; CR-36 awaits a human decision (7.7.3). The date is that of the latest commit when the row was written |
 | 1.6 | 2026-10-09 | CR-36 closure | the commit that carries this row (follows c416247) | CR-36 resolved by a documentation correction in docs/02-architecture.md (section 7 and revision row 1.4); no code change. Step 6 closed. The date is that of the latest commit when the row was written |
+| 1.7 | 2026-10-09 | Triage of CR-39 to CR-41 | the commit that carries this row (follows 535233d) | CR-39, CR-40 and CR-41 (Info) auto-deferred under the human's standing triage rule (7.10); no code or generated-document change. The date is that of the latest commit when the row was written |
 
 ---
 **Gate:** Approve step 6 and continue? (yes / changes needed)
