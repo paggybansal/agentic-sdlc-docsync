@@ -697,6 +697,426 @@ Status for every row: **Deferred, disclosed as Known Limitation.** Severity is a
 | CR-33 | Info | New: an `sk-` key whose body contains no digit is not redacted | Needed to spare names such as `sk-learn-extension`; about 0.3% of random 32-character alphanumeric bodies have no digit |
 | CR-34 | Info | New: an unquoted secret value that contains `}` is redacted only up to the brace | The brace stop keeps JSON structure intact and the output idempotent |
 
+#### 7.7.3 Corrections to the deferred record after T22 (appended; 7.7.1 and 7.7.2 above are not edited)
+
+Added after the human granted the single freeze exception (T22, commit `3487008`, git date 2026-10-09) and after the delta re-review (7.8). Where this subsection disagrees with 7.7.1 or 7.7.2, this subsection is correct.
+
+| Item | What 7.7.1 or 7.7.2 said | Correct statement |
+|---|---|---|
+| CR-33 | Listed in 7.7.2 as a deferred Info finding: "an `sk-` key whose body contains no digit is not redacted" | **Resolved by T22** (`3487008`, severity High). It is removed from the deferred list, and the 7.7.2 row for CR-33 must **not** be copied into the Known Limitations of docs/06-verification.md or docs/07-pr-description.md. Its consequence is recorded as CR-35 (7.8.6) |
+| CR-27 | "The 13 rules in `_RULES` are unnamed" | The real count is **14**: 13 explicit rules (`_EXPLICIT_RULES`, `redact.py:67`) plus 1 heuristic rule (`_HEURISTIC_RULES`, `redact.py:103`). The finding itself (rules are unnamed) is unchanged and still deferred |
+| CR-19 | 7.7.1 says `sk-` package names are spared because the `sk-` rule requires a digit | That condition was removed by T22 (the human ruled that a prefix match is sufficient for explicit patterns). `sk-learn-extension-package-name` is redacted again; this is CR-35. The URL, repository-name, topic, licence-identifier and path parts of CR-19 remain resolved |
+| Line numbers in 7.7.1 | `redact.py` lines cited as of `f837f74` | At `3487008`: `_is_word_like` `:16`, `_is_path_like` `:23`, `_redact_mixed_case_blob` `:31`, `_STRONG_KEY` `:56`, `_VALUE` `:57`, strong-key rule `:87`, table rule `:93`, `sk-` rule `:69`, `redact` `:110`. `_redact_sk_key` no longer exists |
+
+**Final deferred list as of the T22 gate** (each to be disclosed as a Known Limitation with severity and justification, and reproduced verbatim in docs/06-verification.md and docs/07-pr-description.md): CR-7 to CR-16, CR-18, CR-20, CR-21, CR-26, CR-27, CR-29, CR-30, CR-31, CR-32 and CR-34, with severities and justifications exactly as in 7.7.2. For CR-31 step 7 must also include the AC7 reasoning recorded as RO-6 in docs/04-impl-plan.md.
+
+**Raised by the delta re-review (7.8), not on the human's list because they did not yet exist:** CR-35 (Minor) and CR-38 (Info) are disclosed limitations of the redactor; CR-37 (Minor) is corrected by this subsection; **CR-36 (Minor) is open and needs a human decision**: docs/02-architecture.md section 7 still says `sk-` keys are redacted "only if they contain a digit", which the code no longer does. Under the remediation freeze it was not edited; it is either a one-clause documentation correction approved by the human, or a disclosed Known Limitation.
+
+## 7.8 Delta re-review at 3487008
+
+Appended after 7.7; sections 1 to 7.7 are unchanged. Carried forward from 7.6 without re-review (one line): every mandatory area other than Security, Test Coverage and DRY Principle, every file other than `src/docsync/redact.py` and `tests/test_redact.py`, and the status of every finding not named below. The uncommitted pipeline files in the working tree (`.claude/*`, `evidence/*`, `.env.example`) are not product code and were neither reviewed nor touched.
+
+### 7.8.1 Metadata
+
+| Item | Value |
+|---|---|
+| Reviewed commit | `3487008` (`git rev-parse --short HEAD` returned `3487008`) |
+| Commit date (git-derived, `git log -1 --format=%cs 3487008`) | 2026-10-09 |
+| Diff range reviewed | `9e52a1d..3487008`, restricted to `src/docsync/redact.py` and `tests/test_redact.py` |
+| Files at that commit | `src/docsync/redact.py` (123 lines), `tests/test_redact.py` (990 lines) |
+| Reviewer | code-reviewer subagent (independent delta re-review; scratch probes in a directory outside the repository) |
+| Purpose | Closes the integrity gap recorded in 7.7: T21a (`f837f74`) and T22 (`3487008`) changed the redactor after the approved re-review (7.6, `9e52a1d`) and were not independently reviewed |
+
+```text
+ src/docsync/redact.py |  68 +++++++---
+ tests/test_redact.py  | 357 ++++++++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 410 insertions(+), 15 deletions(-)
+```
+
+### 7.8.2 Delta assessment of the three in-scope areas
+
+| Area | Verdict | Evidence | Action |
+|---|---|---|---|
+| Security | Pass with comment | Every explicit pattern redacts a no-digit, no-uppercase variant (7.8.3 probe output; tests `tests/test_redact.py:859`, `:887`, `:899`, `:923`). `redact.py:63-99` `_EXPLICIT_RULES` holds 13 plain-string rules, no callback (independent check: `callable explicit: []`). The only mixed-case plus digit condition is `redact.py:31-42` (`_redact_mixed_case_blob`), bound to the single unprefixed blob rule at `redact.py:103-105`. No unbounded quantifier (7.8.4b). Worst pathological input 6.4 ms (7.8.5). Secret scan: no real credential material (7.8.7). Comment: anchoring and case residuals that let some prefixed tokens through, see CR-38 | None blocking. Record CR-35 to CR-38 |
+| Test Coverage | Pass with comment | `redact.py` 33 statements, 0 missed, 6 branches, 0 partial, 100% (7.8.7). T22 tests: `test_redact.py:859` (the CR-33 case), `:887` (11 parametrised no-digit prefixed secrets), `:899` (PEM), `:923` (6 key shapes), `:932` (sk package name redacted, documented), `:951` (words ending in `sk`), `:959`-`:973` (group structure), `:981` (blob heuristic keeps its condition). Comment: no test pins the boundary behaviour recorded in CR-38 (`abcsk-...`, `SK-...`, 15-character `sk-` body, JWT after `-`), so a later change could alter it silently; `test_cr_33_explicit_rules_use_plain_replacements_with_no_heuristic_callback` (`:965`) proves the explicit group has no callbacks but not that no explicit regex embeds a lookahead that mimics a mixed-case condition (none does today) | Add boundary tests when the file is next touched |
+| DRY Principle | Pass with comment | One redaction function, `redact.py:110` (7.8.4a). `_STRONG` (`redact.py:53`) is reused by `_STRONG_KEY` (`:56`) and the table rule (`:95`); `_SCHEME` (`:52`) is reused by both URL rules (`:85`, `:86`); `_KEEP_PREFIX` (`:51`) by five rules; `_rule` (`:45`) is the single compile helper. Comment: the fragment `[\"']?[ \t]{0,8}[:=][ \t]{0,8}` is written out twice (`:56` and `:89`) and the Authorization rule repeats `[ \t]{0,8}:[ \t]{0,8}` (`:79`) | Info only; consolidate when next touched |
+
+### 7.8.3 CR-33 (High, found after 7.6 and fixed in T22): status Resolved
+
+Evidence: scratch script `probe.py` outside the repository imported the committed module and called `redact()` on a no-digit variant of every explicit pattern. Every line below is the verbatim probe output (full output in 7.8.8).
+
+```text
+sk                           REDACTED   '[REDACTED]'        <- sk-abcdefghijklmnopqrstuvwxyz (no digit, no uppercase)
+ghp                          REDACTED   '[REDACTED]'
+github_pat                   REDACTED   '[REDACTED]'
+gho                          REDACTED   '[REDACTED]'
+ghu                          REDACTED   '[REDACTED]'
+ghs                          REDACTED   '[REDACTED]'
+ghr                          REDACTED   '[REDACTED]'
+AKIA                         REDACTED   '[REDACTED]'
+xoxb                         REDACTED   '[REDACTED]'
+xoxp                         REDACTED   '[REDACTED]'
+jwt                          REDACTED   '[REDACTED]'
+pem                          REDACTED   '[REDACTED]-----END PRIVATE KEY-----'
+json                         REDACTED   '{"password": [REDACTED]}'
+suffixed                     REDACTED   'SECRET_KEY=[REDACTED]'
+plural                       REDACTED   'passwords: [REDACTED]'
+table                        REDACTED   '| password | [REDACTED] |'
+weakkey                      REDACTED   'key=[REDACTED]'
+weakkey_json                 REDACTED   '{"key": [REDACTED]}'
+```
+
+Hidden-condition hunt: all 13 explicit regexes were read at `redact.py:68-98`. None embeds a digit or case requirement; the only digit or case test in the module is in `_redact_mixed_case_blob` (`redact.py:39-40`), attached only to the blob rule. The `AKIA` rule requires 16 upper-case-or-digit characters (a character class, not a mix condition), so `AKIAABCDEFGHIJKLMNOP` matches. Conclusion: CR-33 is Resolved for the case the human ruled on (prefix or key-name match is sufficient).
+
+What is still not caught (honest list, from the boundary probes; all by design of the anchors or length bounds, none a mixed-case or digit condition):
+
+```text
+letters+sk                   UNCHANGED  'abcsk-abcdefghijklmnopqrstuvwxyz'
+SK upper                     UNCHANGED  'SK-abcdefghijklmnopqrstuvwxyz'
+Sk                           UNCHANGED  'Sk-abcdefghijklmnopqrstuvwxyz'
+sk short15                   UNCHANGED  'sk-abcdefghijklmno'
+sk newline split             UNCHANGED  'sk-abcdefgh\nijklmnopqrstuv'
+sk prefixed by digit         UNCHANGED  '1sk-abcdefghijklmnopqrstuvwxyz'
+GHP upper                    UNCHANGED  'GHP_abcdefghijklmnopqrstuvwxyz'
+ghp short                    UNCHANGED  'ghp_abcdefghijklmnopqrs'
+AKIA 17 tail                 UNCHANGED  'AKIAABCDEFGHIJKLMNOPQ'
+AKIA prefixed                UNCHANGED  'XAKIAABCDEFGHIJKLMNOP'
+xoxe                         UNCHANGED  'xoxe-abcdefghijklmnop'
+jwt short seg                UNCHANGED  'eyJabcdefg.abcdefgh.sig'
+jwt prefixed hyphen          UNCHANGED  'x-eyJabcdefgh.abcdefgh.sig'
+```
+
+Caught as required: `sk-` after a hyphen, underscore or colon (`my-[REDACTED]`), a hyphen-split body (`sk-abcdefgh-ijklmnop-qrstuv`), two `sk-` tokens directly adjacent, `ghp_` after letters, 16-character `sk-` body, `Bearer` with 8 characters. Short tokens and `PRIVATE KEY` footers are discussed in CR-38. Real GitHub, Anthropic and AWS tokens are lower-case prefixed, exact length and normally delimited, so these residuals are low likelihood; they are recorded, not blocking.
+
+### 7.8.4 The four invariants
+
+| Invariant | Holds | Evidence |
+|---|---|---|
+| (a) Exactly one redaction function | Yes | `grep -rn "def redact\|def _redact" src/docsync` returned `redact.py:31: def _redact_mixed_case_blob` and `redact.py:110: def redact`. Reviewer agrees the former is a rule callback (a `re.sub` replacement helper for the blob rule, `redact.py:104`), not a second entry point: nothing else calls it and `cli.py` imports only `redact` |
+| (b) No unbounded quantifier | Yes | Independent structural walk of `re._parser.parse` over every pattern in `_RULES`: `rules 14 13 1`, `unbounded: []` (scratch `probe.py`, not the repo test). Enforcing repo test: `tests/test_redact.py:591` `test_every_quantifier_in_every_redaction_pattern_is_bounded` (with `:578` and `:586` proving the checker itself detects `a+`, `a*`, `a{2,}`) |
+| (c) All patterns compiled at module level | Yes | `redact.py:45-48` (`_rule` compiles), used only inside the tuple literals at `redact.py:67` and `:103`; `redact()` at `:110-123` calls only `.sub` and `str.replace`. Repo tests `test_redact.py:603` (tuple of `re.Pattern`) and `:609` (`re.compile` monkeypatched to raise during `redact()`) |
+| (d) `render.py` does not use the redactor; `cli.py` is the only importer | Yes | `grep -rn "redact" src/docsync --include=*.py \| grep import` returned only `src/docsync/cli.py:16: from docsync.redact import redact`; `render.py` imports (`re`, `__version__`, `model`) contain no redactor and `grep -n redact src/docsync/render.py` returned nothing. Repo test `test_redact.py:625` `test_only_the_cli_module_imports_the_redactor` |
+
+### 7.8.5 Performance
+
+Independent timings (scratch `probe.py`, one call per input, `time.perf_counter`; full list in 7.8.8). The nine required inputs, plus ten extra repeated-prefix inputs:
+
+```text
+a*20000                            len= 20000      3.2 ms
+a-*10000=                          len= 20001      3.0 ms
+sk-*6600                           len= 19800      0.2 ms
+eyJ*6600                           len= 19800      3.1 ms
+aA1*6700                           len= 20100      3.4 ms
+password_*2200                     len= 19800      6.4 ms
+| secret |*2000                    len= 20000      3.7 ms
+password="+a*20000                 len= 20010      3.2 ms
+Ab1/*5000                          len= 20000      5.6 ms
+ghp_*5000                          len= 20000      0.2 ms
+AKIA*5000                          len= 20000      3.1 ms
+key=*4000                          len= 16000      2.7 ms
+-----BEGIN PRIVATE KEY-----*1000   len= 27000      2.8 ms
+eyJ..*                             len= 19200      1.4 ms
+https://*2000                      len= 25000      4.3 ms
+bearer *                           len= 21000      3.4 ms
+authorization:*                    len= 22400      1.1 ms
+xoxb-*                             len= 20000      0.7 ms
+a/*10000                           len= 20000      5.3 ms
+```
+
+Worst measured: 6.4 ms for about 20,000 characters (limit in the repo test: 1 second). `python -m pytest -q -m perf tests/test_redact.py` result is in 7.8.8 (26 passed). No super-linear behaviour was observed.
+
+### 7.8.6 New findings
+
+CR-28 to CR-34 already exist in 7.7; ids below start at CR-35 and are never reused.
+
+| CR id | Severity | File:line | Issue | Recommendation | Blocking |
+|---|---|---|---|---|---|
+| CR-35 | Minor | `src/docsync/redact.py:69`; `tests/test_redact.py:932` | Consequence of the CR-33 ruling: any `sk-` token of 16 or more `[A-Za-z0-9_-]` characters that is not preceded by an alphanumeric is redacted, so a package or repository name such as `sk-learn-extension-package-name` becomes `[REDACTED]` (confirmed: result equals `[REDACTED]`). The test at `:932` documents this as intended. Words ending in `sk` (`risk-assessment-...`, `task-scheduler-...`) are not affected (test `:951`). Cosmetic and reversible, consistent with RO-2 | Disclose as a Known Limitation in step 7 and step 8 alongside CR-18 and CR-30 | No |
+| CR-36 | Minor | `docs/02-architecture.md:154` | Stale after T22: the row still says "`sk-` keys (only if they contain a digit)". The code at `redact.py:69` has no such condition. The row also names only `_RULES` and does not mention the `_EXPLICIT_RULES` and `_HEURISTIC_RULES` groups | Correct the sentence at step 7 (the freeze forbids a step 6 remediation) or disclose; the human decides | No |
+| CR-37 | Minor | `docs/05-code-review.md` 7.7.1, 7.7.2 (frozen, not edited) | Stale facts in 7.7, corrected here by appending. (1) Line numbers cited in 7.7.1 no longer point at the cited code: `redact.py:16` was `_redact_sk_key`, now `_is_word_like` (the function is gone); `:62` `_STRONG_KEY` is now `:56`; `:63` `_VALUE` now `:57-61`; `:91` now `:89`; table rule `:97` now `:94-98`; docstring `:107` now `:110-117`; `:22` and `:29` path-like helpers are now `:23` and `:16`; `:37` is now `:31-42`. Test line numbers cited in 7.7.1 (`:591`, `:658`, `:677`, `:694`, `:713`, `:766`, `:782`, `:804`, `:828`, `:844`) were re-checked and still point at the cited tests. (2) The CR-19 row says `_redact_sk_key` requires a digit: superseded by T22. (3) The CR-33 deferred row in 7.7.2 (Info, "an `sk-` key without a digit is not redacted", justified by sparing `sk-learn-extension`) is superseded: CR-33 was High and is Resolved (7.8.3). It must NOT be copied as a Known Limitation into docs/06 and docs/07; CR-35 replaces it. (4) CR-27 says 13 rules; the real count is 14 (13 explicit plus 1 heuristic, `rules 14 13 1`) | Treat 7.8 as the authoritative correction; carry CR-35 instead of the old CR-33 row into Known Limitations | No |
+| CR-38 | Info | `src/docsync/redact.py:68-77` | Anchor, case and length residuals for prefixed tokens (probe list in 7.8.3): `sk-` directly after a letter or digit, upper-case `SK-`/`GHP_`/`XOXB-`, a 15-character `sk-` body, an `AKIA` id with extra trailing alphanumerics or an alphanumeric before it, `xoxe-` tokens, a JWT whose first two segments are under 8 characters or that follows `-` or `_`, `ghp_` bodies under 20 characters, a `sk-` token split by a newline. The PEM rule redacts the header and body but leaves the `-----END ... PRIVATE KEY-----` footer (not secret). The anchors exist to avoid redacting words that end in `sk` and similar; all missed shapes are non-standard for real tokens | Disclose as a Known Limitation; add boundary tests when next touched | No |
+
+Also checked and unchanged (no new id): the key-shape false positives from T21a (`max_tokens = 4096` becomes `max_tokens = [REDACTED]`, reproduced in the probe) are CR-30; the path-like exemption residual is CR-32; runs over 4,096 characters are CR-20 (the blob bound `{40,4096}` at `redact.py:104` is unchanged by T22); an unquoted secret containing `}` is CR-34. Prose such as `password hunter` and `the password is hunter` is not redacted (no `:` or `=`), which is outside FR-6 key=value scope and is recorded here as an observation.
+
+### 7.8.7 Fresh command output (run from the repo root at 3487008)
+
+Command: `python -m pytest -q`
+
+```text
+$ python -m pytest -q
+============================= test session starts =============================
+platform win32 -- Python 3.14.2, pytest-9.1.1, pluggy-1.6.0
+rootdir: C:\Users\parag_bansal\PycharmProjects\GitHub\agentic-sdlc-docsync
+configfile: pyproject.toml
+testpaths: tests
+plugins: platformdirs-4.12.3, cov-7.1.0
+collected 456 items
+
+tests\test_cli.py ...................................................... [ 11%]
+...............................................                          [ 22%]
+tests\test_collect.py .............................s...............      [ 32%]
+tests\test_github.py ................................................... [ 43%]
+............                                                             [ 45%]
+tests\test_integration.py .............                                  [ 48%]
+tests\test_model.py ..........                                           [ 50%]
+tests\test_perf.py .
+[perf] offline generate best of 3: 0.0229 s (all: 0.0311, 0.0380, 0.0229); target < 1.0 s: target met; hard limit < 2.0 s
+.                                                    [ 51%]
+tests\test_redact.py ................................................... [ 62%]
+........................................................................ [ 78%]
+..............................................................           [ 91%]
+tests\test_render.py .....................................               [100%]
+
+======================= 455 passed, 1 skipped in 11.78s =======================
+```
+
+Command: `python -m pytest -q -m perf tests/test_redact.py`
+
+```text
+$ python -m pytest -q -m perf tests/test_redact.py
+============================= test session starts =============================
+platform win32 -- Python 3.14.2, pytest-9.1.1, pluggy-1.6.0
+rootdir: C:\Users\parag_bansal\PycharmProjects\GitHub\agentic-sdlc-docsync
+configfile: pyproject.toml
+plugins: platformdirs-4.12.3, cov-7.1.0
+collected 185 items / 159 deselected / 26 selected
+
+tests\test_redact.py ..........................                          [100%]
+
+===================== 26 passed, 159 deselected in 0.32s ======================
+```
+
+Command: `coverage`
+
+```text
+$ coverage
+============================= test session starts =============================
+platform win32 -- Python 3.14.2, pytest-9.1.1, pluggy-1.6.0
+rootdir: C:\Users\parag_bansal\PycharmProjects\GitHub\agentic-sdlc-docsync
+configfile: pyproject.toml
+testpaths: tests
+plugins: platformdirs-4.12.3, cov-7.1.0
+collected 456 items
+
+tests\test_cli.py ...................................................... [ 11%]
+...............................................                          [ 22%]
+tests\test_collect.py .............................s...............      [ 32%]
+tests\test_github.py ................................................... [ 43%]
+............                                                             [ 45%]
+tests\test_integration.py .............                                  [ 48%]
+tests\test_model.py ..........                                           [ 50%]
+tests\test_perf.py .
+[perf] offline generate best of 3: 0.0113 s (all: 0.0113, 0.0128, 0.0124); target < 1.0 s: target met; hard limit < 2.0 s
+.                                                    [ 51%]
+tests\test_redact.py ................................................... [ 62%]
+........................................................................ [ 78%]
+..............................................................           [ 91%]
+tests\test_render.py .....................................               [100%]
+
+=============================== tests coverage ================================
+_______________ coverage: platform win32, python 3.14.2-final-0 _______________
+
+Name                                 Stmts   Miss Branch BrPart  Cover   Missing
+--------------------------------------------------------------------------------
+src\docsync\__init__.py                  1      0      0      0   100%
+src\docsync\__main__.py                  4      4      2      0     0%   3-8
+src\docsync\cli.py                     102      0     16      0   100%
+src\docsync\collect.py                  79      2     14      1    97%   111->108, 131-132
+src\docsync\collectors\__init__.py       0      0      0      0   100%
+src\docsync\errors.py                    4      0      0      0   100%
+src\docsync\github.py                   47      0      8      0   100%
+src\docsync\model.py                     6      0      0      0   100%
+src\docsync\redact.py                   33      0      6      0   100%
+src\docsync\render.py                   42      0      4      0   100%
+--------------------------------------------------------------------------------
+TOTAL                                  318      6     50      1    98%
+======================= 455 passed, 1 skipped in 6.12s ========================
+```
+
+Command: `ruff check .`
+
+```text
+$ ruff check .
+All checks passed!
+```
+
+Command: `python -m pip_audit`
+
+```text
+$ python -m pip_audit
+No known vulnerabilities found
+Name    Skip Reason
+------- ----------------------------------------------------------------------
+docsync Dependency not found on PyPI and could not be audited: docsync (0.1.0)
+exit=0
+```
+
+Command: `git grep secrets`
+
+```text
+$ git grep secrets
+src/docsync/redact.py:68:    _rule(r"(?:gh[pousr]_|github_pat_)[A-Za-z0-9_]{20,255}", PLACEHOLDER),
+src/docsync/redact.py:70:    _rule(r"(?<![A-Z0-9])AKIA[0-9A-Z]{16}(?![A-Z0-9])", PLACEHOLDER),
+src/docsync/redact.py:77:    _rule(r"-----BEGIN [A-Z ]{0,40}PRIVATE KEY-----[A-Za-z0-9+/=\r\n]{0,8192}", PLACEHOLDER),
+tests/test_cli.py:15:_TOKEN_SHAPED = "ghp_A1b2C3d4E5f6G7h8I9j0K1"
+tests/test_cli.py:429:    shaped = "ghp_A1b2C3d4E5f6G7h8I9j0K1"
+tests/test_cli.py:456:    shaped = "ghp_A1b2C3d4E5f6G7h8I9j0K1"
+tests/test_integration.py:290:    github = "ghp_A1b2C3d4E5f6G7h8I9j0K1L2M3N4O5P6Q7R8"
+tests/test_integration.py:291:    aws = "AKIAIOSFODNN7EXAMPLE"
+tests/test_integration.py:292:    anthropic = "sk-ant-api03-abcdefghijklmnop1234"
+tests/test_redact.py:19:@pytest.mark.parametrize("prefix", ["ghp_", "gho_", "ghu_", "ghs_", "ghr_", "github_pat_"])
+tests/test_redact.py:202:        f"Authorization: Bearer abc ghp_{_BODY} https://u:p@h.io "
+tests/test_redact.py:216:    text = f"password=x ghp_{_BODY}"
+tests/test_redact.py:224:_GH_TOKEN = "ghp_A1b2C3d4E5f6G7h8I9j0K1L2M3N4O5P6Q7R8"
+tests/test_redact.py:242:        "sk-ant-api03-abcdefghijklmnop1234",
+tests/test_redact.py:245:        "github_pat_11ABCDEFG0abcdefghijkl_mnopqrstuvwxyz0123456789",
+tests/test_redact.py:247:        "AKIAIOSFODNN7EXAMPLE",
+tests/test_redact.py:268:        "-----BEGIN RSA PRIVATE KEY-----",
+tests/test_redact.py:269:        "-----BEGIN PRIVATE KEY-----",
+tests/test_redact.py:270:        "-----BEGIN OPENSSH PRIVATE KEY-----",
+tests/test_redact.py:271:        "-----BEGIN EC PRIVATE KEY-----",
+tests/test_redact.py:463:        "sk-ant-api03-abcdefghijklmnop1234",
+tests/test_redact.py:464:        "AKIAIOSFODNN7EXAMPLE",
+tests/test_redact.py:467:        "-----BEGIN PRIVATE KEY-----\nMIIEowIBAAKCAQEAabc+/def==\n-----END PRIVATE KEY-----",
+tests/test_redact.py:498:        "ghp_", "sk-ant", "AKIA", "xoxb-", "eyJ", "MIIEow", "abc123def456", "s3cr3t",
+tests/test_redact.py:514:    "repeated github prefix": "ghp_" * 5000,
+tests/test_redact.py:516:    "repeated pem header": "-----BEGIN PRIVATE KEY-----" * 740,
+tests/test_redact.py:820:    "ghp_A1b2C3d4E5f6G7h8I9j0K1", "AKIAIOSFODNN7EXAMPLE", "sk-ant-api03-abcdefghijklmnop1234",
+tests/test_redact.py:823:    "Zm9vYmFyQmF6UXV4MTIzNDU2Nzg5MEFCQ0RFRkdISUpLTE1O", "-----BEGIN PRIVATE KEY-----",
+tests/test_redact.py:846:    text = "AKIAIOSFODNN7EXAMPLEsk-ant-api03-abcdefghijklmnop1234"
+tests/test_redact.py:852:    assert "AKIA" not in once
+tests/test_redact.py:874:        "ghp_abcdefghijklmnopqrstuvwxyz",
+tests/test_redact.py:875:        "github_pat_abcdefghijklmnopqrstuvwxyz",
+tests/test_redact.py:880:        "AKIAABCDEFGHIJKLMNOP",
+tests/test_redact.py:901:    text = "-----BEGIN PRIVATE KEY-----\nMIIEowIBAAKCAQEAabcdefghijkl\n-----END PRIVATE KEY-----"
+exit=0
+```
+
+Command: `git grep NotImplementedError`
+
+```text
+$ git grep NotImplementedError
+exit=1
+```
+
+
+Secret-scan classification (every match, all in `.py` files; the `:!*.md` filter excludes Markdown):
+
+| Match | Classification |
+|---|---|
+| `src/docsync/redact.py:68`, `:70`, `:77` | Detection patterns (`gh[pousr]_`/`github_pat_`, `AKIA`, `PRIVATE KEY` header), not credentials |
+| `tests/test_cli.py:15`, `:429`, `:456` | Deliberate fake fixture `ghp_A1b2C3d4E5f6G7h8I9j0K1` |
+| `tests/test_integration.py:290-292` | Deliberate fake fixtures (GitHub shape, the AWS documentation example id `AKIAIOSFODNN7EXAMPLE`, an `sk-ant-` shaped string) |
+| `tests/test_redact.py:19`, `:202`, `:216`, `:224`, `:242`, `:245`, `:247`, `:268-271`, `:463-467`, `:498`, `:514`, `:516`, `:820`, `:823`, `:846`, `:852`, `:874-880`, `:901` | Deliberate fake fixtures, prefix lists and ReDoS inputs; every body is an obvious placeholder or the published AWS example |
+
+The secret-scan grep returned matches only in the files above and returned no match in any other non-Markdown file. No match is real credential material, and none sits in product code other than the detection patterns in `src/docsync/redact.py`. `git grep -n NotImplementedError -- src` returned no match (exit 1).
+
+### 7.8.8 Scratch probe output (verbatim, `probe.py`, outside the repository)
+
+```text
+rules 14 13 1
+unbounded: []
+callable explicit: []
+sk                           REDACTED   '[REDACTED]'
+ghp                          REDACTED   '[REDACTED]'
+github_pat                   REDACTED   '[REDACTED]'
+gho                          REDACTED   '[REDACTED]'
+ghu                          REDACTED   '[REDACTED]'
+ghs                          REDACTED   '[REDACTED]'
+ghr                          REDACTED   '[REDACTED]'
+AKIA                         REDACTED   '[REDACTED]'
+xoxb                         REDACTED   '[REDACTED]'
+xoxp                         REDACTED   '[REDACTED]'
+jwt                          REDACTED   '[REDACTED]'
+pem                          REDACTED   '[REDACTED]-----END PRIVATE KEY-----'
+json                         REDACTED   '{"password": [REDACTED]}'
+suffixed                     REDACTED   'SECRET_KEY=[REDACTED]'
+plural                       REDACTED   'passwords: [REDACTED]'
+table                        REDACTED   '| password | [REDACTED] |'
+weakkey                      REDACTED   'key=[REDACTED]'
+weakkey_json                 REDACTED   '{"key": [REDACTED]}'
+-- boundaries --
+letters+sk                   UNCHANGED  'abcsk-abcdefghijklmnopqrstuvwxyz'
+SK upper                     UNCHANGED  'SK-abcdefghijklmnopqrstuvwxyz'
+Sk                           UNCHANGED  'Sk-abcdefghijklmnopqrstuvwxyz'
+sk short15                   UNCHANGED  'sk-abcdefghijklmno'
+sk 16                        REDACTED   '[REDACTED]'
+sk hyphen-split              REDACTED   '[REDACTED]'
+sk newline split             UNCHANGED  'sk-abcdefgh\nijklmnopqrstuv'
+sk adjacent                  REDACTED   '[REDACTED]'
+sk prefixed by hyphen        REDACTED   'my-[REDACTED]'
+sk prefixed by underscore    REDACTED   'x_[REDACTED]'
+sk prefixed by digit         UNCHANGED  '1sk-abcdefghijklmnopqrstuvwxyz'
+sk after colon               REDACTED   'x:[REDACTED]'
+ghp short                    UNCHANGED  'ghp_abcdefghijklmnopqrs'
+GHP upper                    UNCHANGED  'GHP_abcdefghijklmnopqrstuvwxyz'
+ghp after letters            REDACTED   'x[REDACTED]'
+akia lower                   UNCHANGED  'akiaabcdefghijklmnop'
+AKIA 15                      UNCHANGED  'AKIAABCDEFGHIJKLMNO'
+AKIA 17 tail                 UNCHANGED  'AKIAABCDEFGHIJKLMNOPQ'
+AKIA prefixed                UNCHANGED  'XAKIAABCDEFGHIJKLMNOP'
+xoxb short                   UNCHANGED  'xoxb-abcdefghi'
+xoxe                         UNCHANGED  'xoxe-abcdefghijklmnop'
+XOXB                         UNCHANGED  'XOXB-abcdefghijklmnop'
+jwt short seg                UNCHANGED  'eyJabcdefg.abcdefgh.sig'
+jwt 2seg                     REDACTED   '[REDACTED]'
+jwt prefixed hyphen          UNCHANGED  'x-eyJabcdefgh.abcdefgh.sig'
+pem lower                    UNCHANGED  '-----begin private key-----\nabc\n'
+pem RSA                      REDACTED   '[REDACTED]-----END RSA PRIVATE KEY-----'
+pem OPENSSH                  REDACTED   '[REDACTED]'
+pem ENCRYPTED                REDACTED   '[REDACTED]'
+bearer short                 UNCHANGED  'Bearer abcdefg'
+bearer 8                     REDACTED   'Bearer [REDACTED]'
+password quoted space        REDACTED   'password = [REDACTED]'
+token yaml                   REDACTED   'token: [REDACTED]'
+apikey                       REDACTED   'apikey=[REDACTED]'
+api-key                      REDACTED   'api-key: [REDACTED]'
+api_key short                UNCHANGED  'api_key=short'
+secretkey                    REDACTED   'client_secret=[REDACTED]'
+x-api-key hdr                REDACTED   'x-api-key: [REDACTED]'
+key 19                       UNCHANGED  'key=abcdefghijklmnopqrs'
+private_key                  UNCHANGED  'private_key=abc'
+access_key short             UNCHANGED  'access_key=abc'
+password in table sep        REDACTED   '| Password | [REDACTED] |'
+password space               UNCHANGED  'password hunter'
+password is                  UNCHANGED  'the password is hunter'
+max_tokens                   REDACTED   'max_tokens = [REDACTED]'
+api_key_value                UNCHANGED  'api_key_value=abc'
+tokenizer                    UNCHANGED  'tokenizer: x'
+blob lower 60                UNCHANGED  'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+blob mixed nodigit           UNCHANGED  'aBaBaBaBaBaBaBaBaBaBaBaBaBaBaBaBaBaBaBaBaBaBaBaBaBaBaBaBaBaB'
+blob b64url                  UNCHANGED  'aB1-aB1-aB1-aB1-aB1-aB1-aB1-aB1-aB1-aB1-aB1-aB1-aB1-aB1-aB1-'
+--- perf ---
+a*20000                            len= 20000      3.2 ms
+a-*10000=                          len= 20001      3.0 ms
+sk-*6600                           len= 19800      0.2 ms
+eyJ*6600                           len= 19800      3.1 ms
+aA1*6700                           len= 20100      3.4 ms
+password_*2200                     len= 19800      6.4 ms
+| secret |*2000                    len= 20000      3.7 ms
+password="+a*20000                 len= 20010      3.2 ms
+Ab1/*5000                          len= 20000      5.6 ms
+ghp_*5000                          len= 20000      0.2 ms
+AKIA*5000                          len= 20000      3.1 ms
+key=*4000                          len= 16000      2.7 ms
+-----BEGIN PRIVATE KEY-----*1000   len= 27000      2.8 ms
+eyJ..*                             len= 19200      1.4 ms
+https://*2000                      len= 25000      4.3 ms
+bearer *                           len= 21000      3.4 ms
+authorization:*                    len= 22400      1.1 ms
+xoxb-*                             len= 20000      0.7 ms
+a/*10000                           len= 20000      5.3 ms
+worst ms 6.4
+```
+
+### 7.8.9 Final verdict for step 6 as a whole
+
+**Approved.**
+
+No in-scope row is `Fail` (Security: Pass with comment; Test Coverage: Pass with comment; DRY Principle: Pass with comment). CR-33 (High) is Resolved. There is no open Blocker or Major finding: the new findings CR-35 to CR-37 are Minor and CR-38 is Info, none blocking. Blocking CR ids: none. No High severity security or correctness defect remains open, so the remediation freeze (RO-4) is not reopened. Items to carry into Known Limitations: CR-35 (replacing the superseded CR-33 row of 7.7.2), CR-38, and the existing deferred rows; CR-36 should be corrected or disclosed at step 7.
+
+This verdict supersedes 7.6 and is the closing verdict for step 6; sections 1 to 7.7 are retained unchanged as the record.
+
 ## 8. Revision History
 
 | Version | Date | Event | Commit(s) | Notes |
@@ -705,6 +1125,8 @@ Status for every row: **Deferred, disclosed as Known Limitation.** Severity is a
 | 1.1 | 2026-10-08 | Remediation | CR-4: 546f4b1, 675750f; skill alignment (CR-5): 2cfa41a; plan amendment: 0446e96; T20: 9e52a1d | CR-4 fixed by changing the behaviour (RO-3); T20 rewrote `src/docsync/redact.py` (CR-1, CR-2, CR-3); CR-5 resolved by aligning the secret-safety skill to the implemented and architecturally documented placeholder |
 | 1.2 | 2026-10-08 | Re-review | re-review committed as d8fb7de, reviewing 9e52a1d | Verdict `Approved`; CR-1 to CR-6 Resolved or Accepted; new findings CR-17 to CR-27 (Minor and Info) |
 | 1.3 | 2026-10-08 | Final remediation (T21) | Plan: 167d039; CLAUDE.md rule 9: 4bd4fb8; T21a: f837f74; T21b and T21c: the commit that carries this row | CR-17, CR-19, CR-22, CR-23, CR-24, CR-25 and CR-28 resolved; CR-7 to CR-16, CR-18, CR-20, CR-21, CR-26, CR-27 and CR-29 to CR-34 deferred as Known Limitations (7.7.2); remediation freeze (RO-4) in force. Not a new independent review (7.7) |
+| 1.4 | 2026-10-09 | Freeze exception (T22) | Plan: 2f68a61 (dated 2026-10-09); T22: 3487008 | CR-33 (High, security false negative) resolved: explicit prefixed credential rules no longer need mixed case or a digit; rules split into `_EXPLICIT_RULES` and `_HEURISTIC_RULES`; real rule count 14; CR-33 removed from the deferred list (7.7.3); RO-5 and RO-6 recorded for step 7 |
+| 1.5 | 2026-10-09 | Delta re-review | reviewing 3487008; committed as the commit that carries this row | Independent review of `src/docsync/redact.py` and `tests/test_redact.py` over `9e52a1d..3487008` (Security, Test Coverage, DRY). Closing verdict for step 6: `Approved`; new findings CR-35 to CR-38; CR-36 awaits a human decision (7.7.3). The date is that of the latest commit when the row was written |
 
 ---
 **Gate:** Approve step 6 and continue? (yes / changes needed)
