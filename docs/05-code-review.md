@@ -1117,6 +1117,16 @@ No in-scope row is `Fail` (Security: Pass with comment; Test Coverage: Pass with
 
 This verdict supersedes 7.6 and is the closing verdict for step 6; sections 1 to 7.7 are retained unchanged as the record.
 
+## 7.9 Resolution of CR-36 (documentation correction, not a code change)
+
+Appended after 7.8; nothing above is edited. Recorded the same way as CR-5 (resolved by changing the specification) and CR-28 (resolved by appending a correction).
+
+| CR id | Severity | Status | Evidence | Notes |
+|---|---|---|---|---|
+| CR-36 | Minor | **Resolved by documentation correction, not a code change** | docs/02-architecture.md section 7, Security Design, the `Redaction` row: the clause "`sk-` keys (only if they contain a digit)" is now "`sk-` keys", and a sentence states the two rule groups; revision history row 1.4 records the correction with its date from git (2026-10-09) | The human approved the correction at the step 6 closing gate and ruled that the remediation freeze blocks discretionary work, not factual errors in graded deliverables. `src/docsync/redact.py` is unchanged (reviewed commit `3487008`). The corrected text says: explicit prefixed credential patterns are redacted on a prefix match alone and do not require mixed case or a digit; the unprefixed base64 blob heuristic requires at least one uppercase letter, one lowercase letter and one digit |
+
+Re-scan after the correction: docs/01 to docs/04 were searched for any other clause that contradicts the post-T22 redactor. No other normative clause was found. Historical task and review records that describe behaviour that was later superseded were reported to the human as candidates and left unchanged, pending the human's decision.
+
 ## 8. Revision History
 
 | Version | Date | Event | Commit(s) | Notes |
@@ -1127,6 +1137,7 @@ This verdict supersedes 7.6 and is the closing verdict for step 6; sections 1 to
 | 1.3 | 2026-10-08 | Final remediation (T21) | Plan: 167d039; CLAUDE.md rule 9: 4bd4fb8; T21a: f837f74; T21b and T21c: the commit that carries this row | CR-17, CR-19, CR-22, CR-23, CR-24, CR-25 and CR-28 resolved; CR-7 to CR-16, CR-18, CR-20, CR-21, CR-26, CR-27 and CR-29 to CR-34 deferred as Known Limitations (7.7.2); remediation freeze (RO-4) in force. Not a new independent review (7.7) |
 | 1.4 | 2026-10-09 | Freeze exception (T22) | Plan: 2f68a61 (dated 2026-10-09); T22: 3487008 | CR-33 (High, security false negative) resolved: explicit prefixed credential rules no longer need mixed case or a digit; rules split into `_EXPLICIT_RULES` and `_HEURISTIC_RULES`; real rule count 14; CR-33 removed from the deferred list (7.7.3); RO-5 and RO-6 recorded for step 7 |
 | 1.5 | 2026-10-09 | Delta re-review | reviewing 3487008; committed as the commit that carries this row | Independent review of `src/docsync/redact.py` and `tests/test_redact.py` over `9e52a1d..3487008` (Security, Test Coverage, DRY). Closing verdict for step 6: `Approved`; new findings CR-35 to CR-38; CR-36 awaits a human decision (7.7.3). The date is that of the latest commit when the row was written |
+| 1.6 | 2026-10-09 | CR-36 closure | the commit that carries this row (follows c416247) | CR-36 resolved by a documentation correction in docs/02-architecture.md (section 7 and revision row 1.4); no code change. Step 6 closed. The date is that of the latest commit when the row was written |
 
 ---
 **Gate:** Approve step 6 and continue? (yes / changes needed)
