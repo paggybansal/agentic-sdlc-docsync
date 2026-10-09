@@ -1,67 +1,48 @@
-# DS-2 — Documentation Freshness Report
+# DS-3 — Licence fallback from a LICENSE file
 
 | Field | Value |
 |---|---|
-| Issue key | DS-2 |
+| Issue key | DS-3 |
 | Type | Story |
-| Epic | Developer Experience / Agentic SDLC |
-| Priority | Medium |
-| Reporter | Tech Lead |
-| Assignee | Parag Bansal |
-| Status | To Do |
-| Source | Local ticket file (stands in for JIRA/Confluence) |
-| Depends on | DS-1 (docsync generate / check) |
+| Priority | Low |
+| Reporter | Reviewer of PR #1 |
+| Source | Known Limitation disclosed in DS-1 verification |
+| Depends on | DS-1 |
 
 ## User Story
 
-**As a** tech lead reviewing pull requests across several repositories,
-**I want** a single score telling me how complete a project's generated documentation is,
-**so that** I can block merges on documentation that is mostly empty instead of reading
-every generated file myself.
+**As a** reviewer reading generated documentation,
+**I want** the licence to be reported when the repository ships a `LICENSE` file but does not
+declare a licence in `pyproject.toml`,
+**so that** the field stops reading `Not Found` for projects that clearly are licensed.
 
 ## Problem
 
-DS-1 made documentation accurate, but not necessarily *useful*. A project with no
-description, no dependencies declared and no tests produces a document where nearly every
-field reads `Not Found` — technically in sync, practically worthless. Reviewers currently
-have to open the document and eyeball it. There is no number, no threshold, and nothing CI
-can gate on.
-
-## Scope
-
-A new read-only subcommand that scores the generated documentation and can fail a build.
+DS-1 resolves the licence only from `pyproject.toml`. This repository ships an MIT `LICENSE`
+file, yet the generated document reports `License: Not Found`. That was disclosed as a known
+limitation in PR #1 and is now being picked up as its own work item.
 
 ## Acceptance Criteria
 
-- **AC1** — A new `report` subcommand prints a completeness score for the project's
-  documentation.
-- **AC2** — The score reflects how many documentation fields were resolved versus how many
-  read `Not Found`.
-- **AC3** — Reviewers can set a minimum acceptable score, and the command must fail when the
-  project falls below it.
-- **AC4** — The report must say *which* fields are missing, not just give a number.
-- **AC5** — The command must work with no network access.
-- **AC6** — Running the command must never modify any file.
-- **AC7** — The same project scored twice in a row must give the same score.
-
-## Non-Functional Expectations
-
-- Must be usable in CI.
-- Must not slow the existing commands down.
-- Must reuse the existing collectors rather than re-reading the repository differently.
-- Must keep the existing secret-handling guarantees.
+- **AC1** — When `pyproject.toml` declares a licence, that value continues to be used
+  unchanged.
+- **AC2** — When it declares none but a licence file exists in the repository root, the
+  licence is reported from that file.
+- **AC3** — When neither source is available, the field still reads `Not Found`.
+- **AC4** — A licence file that cannot be understood must not crash the tool.
+- **AC5** — The document must remain byte-identical across repeated runs.
+- **AC6** — The committed `docs/PROJECT_DOCS.md` must be regenerated and remain in sync.
 
 ## Notes / Open Questions from Refinement
 
-- We did not agree how the score is calculated or whether all fields weigh the same.
-- We did not define the output format, or whether machine-readable output is needed.
-- The default threshold was not discussed.
-- Nobody specified the exit code for "below threshold".
-- It is unclear whether hosted fields should count when running offline, since they are
-  always `Not Found` in that mode.
+- We did not agree which filenames count as a licence file.
+- We did not define how the licence name is identified from the file's contents, or how much
+  of the file may be read.
+- It is unclear whether the document should say where the licence came from.
+- The behaviour when both sources disagree was not discussed.
 
 ## Out of Scope
 
-- Scoring more than one repository per run.
-- Storing or trending scores over time.
-- Changing anything about `generate` or `check` output.
+- SPDX validation.
+- Reading licences from dependencies.
+- Changing the hosted licence field, which comes from the platform API.
