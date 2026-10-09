@@ -33,7 +33,6 @@
 | Module | src/docsync/__main__.py |
 | Module | src/docsync/cli.py |
 | Module | src/docsync/collect.py |
-| Module | src/docsync/collectors/__init__.py |
 | Module | src/docsync/errors.py |
 | Module | src/docsync/github.py |
 | Module | src/docsync/model.py |
