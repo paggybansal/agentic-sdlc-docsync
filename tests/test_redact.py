@@ -757,8 +757,8 @@ _STRUCTURED_TEXT = [
     "https://github.com/SomeOrganisationName/VeryLongRepositoryName1234567890",
     "https://example.com/Docs/UserGuide/Chapter2/Installation/WindowsSetup/Details",
     "src/docsync/SomeVeryLongPackageNameWithMixedCase123/AnotherLongDirectoryName456/file.py",
-    "sk-learn-extension-package-name",
     "scikit-learn-extension-package-with-a-long-name",
+    "risk-assessment-framework-with-a-rather-long-name",
 ]
 
 
@@ -851,3 +851,140 @@ def test_cr_22_idempotency_is_not_claimed_for_secrets_glued_together_without_a_d
     # Assert: documented limitation, not a requirement; the first pass still hides the AWS key
     assert "AKIA" not in once
     assert redact(once) != once
+
+
+# --- T22: prefixed credentials need no mixed case or digit (CR-33) -----------------------------
+
+
+def test_cr_33_sk_key_without_a_digit_or_uppercase_is_replaced() -> None:
+    # Arrange
+    text = "key sk-abcdefghijklmnopqrstuvwxyz end"
+
+    # Act
+    result = redact(text)
+
+    # Assert
+    assert result == f"key {PLACEHOLDER} end"
+
+
+@pytest.mark.parametrize(
+    "secret",
+    [
+        "sk-abcdefghijklmnopqrstuvwxyz",
+        "ghp_abcdefghijklmnopqrstuvwxyz",
+        "github_pat_abcdefghijklmnopqrstuvwxyz",
+        "gho_abcdefghijklmnopqrstuvwxyz",
+        "ghu_abcdefghijklmnopqrstuvwxyz",
+        "ghs_abcdefghijklmnopqrstuvwxyz",
+        "ghr_abcdefghijklmnopqrstuvwxyz",
+        "AKIAABCDEFGHIJKLMNOP",
+        "xoxb-abcdefghijklmnop",
+        "xoxp-abcdefghijklmnop-abcdefghijklmnop",
+        "eyJabcdefghijklm.eyJabcdefghijklm.abcdefghijklm",
+    ],
+    ids=lambda s: s[:12],
+)
+def test_cr_33_each_prefixed_pattern_matches_without_a_digit(secret: str) -> None:
+    # Arrange
+    assert not any(c.isdigit() for c in secret)
+    text = f"before {secret} after"
+
+    # Act
+    result = redact(text)
+
+    # Assert
+    assert result == f"before {PLACEHOLDER} after"
+
+
+def test_cr_33_pem_private_key_without_digits_is_replaced() -> None:
+    # Arrange
+    text = "-----BEGIN PRIVATE KEY-----\nMIIEowIBAAKCAQEAabcdefghijkl\n-----END PRIVATE KEY-----"
+
+    # Act
+    result = redact(text)
+
+    # Assert
+    assert "MIIEowIBAAKCAQEA" not in result
+    assert result.startswith(PLACEHOLDER)
+
+
+@pytest.mark.parametrize(
+    ("text", "leaked"),
+    [
+        ('{"password": "hunter"}', "hunter"),
+        ("SECRET_KEY=hunter", "hunter"),
+        ("passwords: hunter", "hunter"),
+        ("| password | hunter |", "hunter"),
+        ("api_key=abcdefghijklmnopqrstuvwxyz", "abcdefghijklmnopqrstuvwxyz"),
+        ('{"api_key": "abcdefghijklmnopqrstuvwxyz"}', "abcdefghijklmnopqrstuvwxyz"),
+    ],
+    ids=["json", "suffixed", "plural", "table", "weak-key", "weak-key-json"],
+)
+def test_cr_33_cr_17_key_shapes_need_no_digit_or_mixed_case(text: str, leaked: str) -> None:
+    # Arrange / Act
+    result = redact(text)
+
+    # Assert
+    assert leaked not in result
+    assert PLACEHOLDER in result
+
+
+def test_cr_33_prefix_match_is_sufficient_so_sk_package_names_are_redacted() -> None:
+    # Arrange: a documented consequence of the ruling, not a requirement to redact such names
+    text = "sk-learn-extension-package-name"
+
+    # Act
+    result = redact(text)
+
+    # Assert
+    assert result == PLACEHOLDER
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "scikit-learn-extension-package-with-a-long-name",
+        "risk-assessment-framework-with-a-rather-long-name",
+        "task-scheduler-with-an-extremely-long-name-here",
+    ],
+)
+def test_cr_33_words_that_merely_end_in_sk_are_not_keys(text: str) -> None:
+    # Arrange / Act
+    result = redact(text)
+
+    # Assert
+    assert result == text
+
+
+def test_cr_33_rules_are_split_into_an_explicit_group_and_a_heuristic_group() -> None:
+    # Arrange / Act / Assert
+    assert redact_module._RULES == redact_module._EXPLICIT_RULES + redact_module._HEURISTIC_RULES
+    assert len(redact_module._HEURISTIC_RULES) == 1
+
+
+def test_cr_33_explicit_rules_use_plain_replacements_with_no_heuristic_callback() -> None:
+    # Arrange / Act
+    replacements = [replacement for _, replacement in redact_module._EXPLICIT_RULES]
+
+    # Assert
+    assert all(isinstance(r, str) for r in replacements)
+
+
+def test_cr_33_only_the_heuristic_group_applies_the_mixed_case_and_digit_condition() -> None:
+    # Arrange / Act
+    replacements = [replacement for _, replacement in redact_module._HEURISTIC_RULES]
+
+    # Assert
+    assert all(callable(r) for r in replacements)
+
+
+def test_cr_33_heuristic_blob_still_requires_mixed_case_and_a_digit() -> None:
+    # Arrange
+    sha256 = hashlib.sha256(b"docsync").hexdigest()
+    lowercase = "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"
+
+    # Act / Assert
+    assert len(sha256) == 64
+    assert redact(sha256) == sha256
+    assert redact(lowercase) == lowercase
+    assert redact(_MIXED_BLOB) == PLACEHOLDER

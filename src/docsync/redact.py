@@ -13,12 +13,6 @@ PLACEHOLDER = "[REDACTED]"
 _Replacement = str | Callable[["re.Match[str]"], str]
 
 
-def _redact_sk_key(match: "re.Match[str]") -> str:
-    """Redact an ``sk-`` key only if it contains a digit (spares names such as ``sk-learn-x``)."""
-    text = match.group(0)
-    return PLACEHOLDER if any(c.isdigit() for c in text) else text
-
-
 def _is_word_like(segment: str) -> bool:
     """A long segment of letters (optional digit suffix) that is mostly lower case, like words."""
     letters = segment.rstrip("0123456789")
@@ -66,11 +60,13 @@ _VALUE = (
     r"|[^\s,;|}\"']{1,256})"
 )
 
-# Order matters (docs/02-architecture.md section 7): provider tokens, then header and URL
-# credentials, then key=value pairs, then the generic blob heuristic last.
-_RULES: tuple[tuple[re.Pattern[str], _Replacement], ...] = (
+# Group (a): explicit credential patterns. A match of the prefix or key name is sufficient;
+# none of these rules may require mixed case or a digit (T22, CR-33). Order matters
+# (docs/02-architecture.md section 7): provider tokens, then header and URL credentials,
+# then key=value pairs.
+_EXPLICIT_RULES: tuple[tuple[re.Pattern[str], _Replacement], ...] = (
     _rule(r"(?:gh[pousr]_|github_pat_)[A-Za-z0-9_]{20,255}", PLACEHOLDER),
-    _rule(r"(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{16,255}", _redact_sk_key),
+    _rule(r"(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{16,255}", PLACEHOLDER),
     _rule(r"(?<![A-Z0-9])AKIA[0-9A-Z]{16}(?![A-Z0-9])", PLACEHOLDER),
     _rule(r"xox[baprs]-[A-Za-z0-9-]{10,200}", PLACEHOLDER),
     _rule(
@@ -100,8 +96,15 @@ _RULES: tuple[tuple[re.Pattern[str], _Replacement], ...] = (
         _KEEP_PREFIX,
         re.IGNORECASE,
     ),
+)
+
+# Group (b): the unprefixed base64 blob heuristic, applied last. Only this group keeps the
+# uppercase plus lowercase plus digit condition (and the URL or path exemption).
+_HEURISTIC_RULES: tuple[tuple[re.Pattern[str], _Replacement], ...] = (
     _rule(r"[A-Za-z0-9+/]{40,4096}={0,2}", _redact_mixed_case_blob),
 )
+
+_RULES: tuple[tuple[re.Pattern[str], _Replacement], ...] = _EXPLICIT_RULES + _HEURISTIC_RULES
 
 
 def redact(text: str, secrets: Iterable[str] = ()) -> str:
