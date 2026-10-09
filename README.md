@@ -26,6 +26,24 @@ repository and its GitHub metadata.
 | 8. Pull Request | `docs/07-pr-description.md` |
 | Tool output | `docs/PROJECT_DOCS.md` |
 
+## Usage
+
+```text
+docsync generate [--repo PATH] [--out PATH] [--github-repo OWNER/NAME] [--offline] [--verbose]
+docsync check    [--repo PATH] [--out PATH] [--github-repo OWNER/NAME] [--offline] [--verbose]
+```
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--repo PATH` | `.` | Repository root to document; must be an existing directory |
+| `--out PATH` | `<repo>/docs/PROJECT_DOCS.md` | Output file. If omitted, the default is resolved against the `--repo` root, never the current directory. If given, a relative path is resolved against the current directory; it must end in `.md` and lie inside `--repo` |
+| `--github-repo OWNER/NAME` | none | Enables hosted metadata; omitted means hosted fields are `Not Found` |
+| `--offline` | off | No network calls, even if `DOCSYNC_GITHUB_TOKEN` is set |
+| `--verbose` | off | Extra diagnostics on stderr (redacted) |
+
+Exit codes: `0` success or in sync, `1` drift detected (`check`), `2` invalid input or error.
+Also runnable as `python -m docsync`.
+
 ## Quick start
 
 ```bash

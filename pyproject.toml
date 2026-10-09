@@ -28,6 +28,7 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v --strict-markers"
+markers = ["perf: wall-clock sensitive performance budget tests"]
 
 [tool.coverage.run]
 source = ["src/docsync"]
