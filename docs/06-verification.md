@@ -15,7 +15,7 @@
 |---|---|
 | OS | Microsoft Windows 11 Enterprise, `ver`: `Microsoft Windows [Version 10.0.26200.9457]`; commands run in Git Bash (`MINGW64_NT-10.0-26200`) |
 | Python | 3.14.2 |
-| Commit hash | `c848991` (`git rev-parse --short HEAD`), branch `feature/DS-1-docsync` |
+| Commit hash | `c848991` for the first verification run (`git rev-parse --short HEAD`), branch `feature/DS-1-docsync`. Later commits made during step 7 at the human's direction: `27b00d1` (track PROJECT_DOCS.md), `91fdad9` (LICENSE), `9a84131` (human commit "add verification file.", which added an earlier version of this file), `bbc142c` (remove dead collectors package, RO-2), `0c334f2` (regenerate PROJECT_DOCS.md). Post-deletion figures below were measured on `0c334f2` |
 | Commit date | 2026-10-09 (`git log -1 --format=%cs HEAD`) |
 | Tools | pytest 9.1.1, pytest-cov 7.1.0, ruff 0.16.10 |
 | Runtime dependencies as installed | requests 2.34.2, urllib3 2.8.0, certifi 2026.7.22, idna 3.20, charset-normalizer 3.5.2 |
@@ -43,6 +43,8 @@ exit=0
 pip-audit scope (RO-4, RO-10). Audited: the installed runtime and dev dependencies of the active environment (requests 2.34.2, urllib3 2.8.0, certifi 2026.7.22, idna 3.20, charset-normalizer 3.5.2, pytest, pytest-cov, ruff and their dependencies). Not audited: the local editable package `docsync (0.1.0)`, which is not on PyPI, so skipping it is expected behaviour and not a defect.
 
 ## 3. Test Execution Evidence
+
+Run 1, at `c848991`, BEFORE the RO-2 deletion (superseded for coverage by run 2 below; kept as the original record):
 
 ```text
 $ python -m pytest -q --cov=src/docsync --cov-report=term-missing
@@ -90,6 +92,40 @@ TOTAL                                  318      6     50      1    98%
 exit=0
 ```
 
+Run 2, local Windows, AFTER the RO-2 deletion of `src/docsync/collectors/` (commit `bbc142c`; `ruff check .` printed `All checks passed!`, exit 0). Tail of the real output, which replaces the run 1 coverage table:
+
+```text
+$ python -m pytest -q --cov=src/docsync --cov-report=term-missing   (tail)
+tests\test_redact.py ................................................... [ 62%]
+........................................................................ [ 78%]
+..............................................................           [ 91%]
+tests\test_render.py .....................................               [100%]
+
+=============================== tests coverage ================================
+_______________ coverage: platform win32, python 3.14.2-final-0 _______________
+
+Name                      Stmts   Miss Branch BrPart  Cover   Missing
+---------------------------------------------------------------------
+src\docsync\__init__.py       1      0      0      0   100%
+src\docsync\__main__.py       4      4      2      0     0%   3-8
+src\docsync\cli.py          102      0     16      0   100%
+src\docsync\collect.py       79      2     14      1    97%   111->108, 131-132
+src\docsync\errors.py         4      0      0      0   100%
+src\docsync\github.py        47      0      8      0   100%
+src\docsync\model.py          6      0      0      0   100%
+src\docsync\redact.py        33      0      6      0   100%
+src\docsync\render.py        42      0      4      0   100%
+---------------------------------------------------------------------
+TOTAL                      318      6     50      1    98%
+======================= 455 passed, 1 skipped in 6.76s ========================
+```
+
+New local coverage total: 98% (318 statements, 6 missed); unchanged because the deleted module had 0 statements. The `collectors/__init__.py` row is gone. The later run also printed `collected 456 items` and `[perf] offline generate best of 3: 0.0140 s (all: 0.0175, 0.0140, 0.0786)`, so the current NFR-1 figure is 0.0140 s (earlier 0.0174 s).
+
+RO-2 was found incomplete during verification: `src/docsync/collectors/__init__.py`, an empty stub, was still present (CR-9, PA-2). The human decided to remove it. `git grep -n "collectors" -- src tests docs .github` found no import of the package: the hits were prose in docs/02, docs/04, docs/05, docs/06 and docs/PROJECT_DOCS.md, two path strings used as redaction test fixtures (`tests/test_redact.py:363` and `:753`), and one docstring (`tests/test_render.py:219`). The stub was removed with `git rm -r` (commit `bbc142c`, one file, 0 lines), the module row disappeared from `docs/PROJECT_DOCS.md` (diff: one deleted line `| Module | src/docsync/collectors/__init__.py |`), and `docsync check` returned `in sync`, exit 0, after regeneration (commit `0c334f2`).
+
+Linux CI coverage (human-supplied, read from the `test (ubuntu-latest / py3.12)` job, measured BEFORE the deletion; the verifier did not measure it): TOTAL 339 statements, 6 missed, 98%, which exceeds the NFR-3 target of 85%. Uncovered: `__main__.py` 3-8 (CR-10, deferred) and `collect.py` 111->108 and 131-132 (see CR-8, CR-10 and CR-43 in section 8.3). The Windows and Linux statement totals differ (318 against 339); the reason was not investigated. The Windows figures stay separate from the Linux figure.
+
 Skip reason (`python -m pytest -q -rs`, filtered with `grep -i skip`):
 
 ```text
@@ -97,7 +133,7 @@ SKIPPED [1] tests\test_collect.py:273: EL-1: directory symlink creation is not p
 ======================= 455 passed, 1 skipped in 5.70s ========================
 ```
 
-NFR-3 target is 85% line coverage; measured TOTAL is 98%. No shortfall. NFR-1 measured by the perf test: best of 3 = 0.0174 s against the 1.0 s target (hard limit 2.0 s).
+NFR-3 target is 85% line coverage; measured TOTAL is 98% locally before and after the RO-2 deletion and 98% on Linux CI (human-supplied). No shortfall. NFR-1 measured by the perf test: best of 3 = 0.0174 s against the 1.0 s target (hard limit 2.0 s).
 
 NFR-4 evidence (EC id in test names), count of `def test_ec_<n>_*` per EC from `grep -rhoiE "def test_ec_<n>_[a-z0-9_]*" tests | wc -l`:
 
@@ -137,25 +173,27 @@ EC-14: 3
 | test (windows-latest / py3.12) https://github.com/paggybansal/agentic-sdlc-docsync/actions/runs/37918218702/job/113779510797 | success | Install, Lint, Test with coverage, Documentation sync gate |
 | dependency audit (advisory) https://github.com/paggybansal/agentic-sdlc-docsync/actions/runs/37918218702/job/113779510319 | success | pip-audit |
 
-Symlink test on Linux (EL-1) and directory-order test (EL-2): `Not Found`. The per-test lines are in the job logs, and the logs endpoint refused the request: `curl https://api.github.com/repos/paggybansal/agentic-sdlc-docsync/actions/jobs/113779510650/logs` returned `http=403` with the body `{"message": "Must have admin rights to Repository.", ...}`. What the evidence does show: on both Ubuntu jobs the step `Test with coverage` (`python -m pytest -v --cov=src/docsync --cov-report=term-missing`) concluded `success`, so pytest exited 0 there. The symlink test is guarded only by `skipif(not _symlinks_available())` (`tests/test_collect.py:273`), so on Linux it either passed or skipped; the job conclusion alone cannot tell which, and I do not claim it executed. EL-1 and EL-2 are therefore NOT closed by evidence available to this step. A person with log access can read the `test_scan_modules_symlinked_directory_is_not_followed` line in the Ubuntu job logs to close EL-1. The `Documentation sync gate` step (`docsync generate` then `docsync check`) also passed on all four test jobs.
+The job logs could not be read by the verifier: `curl https://api.github.com/repos/paggybansal/agentic-sdlc-docsync/actions/jobs/113779510650/logs` returned `http=403` with the body `{"message": "Must have admin rights to Repository.", ...}`. On both Ubuntu jobs the step `Test with coverage` concluded `success`. The EL-1 and EL-2 closure below rests on figures the human read from the job log, not on anything the verifier measured. The `Documentation sync gate` step (`docsync generate` then `docsync check`) also passed on all four test jobs.
 
 CI runs offline (FIX 1d). `.github/workflows/ci.yml` lines 38-40 run `docsync generate --repo . --out docs/PROJECT_DOCS.md` then `docsync check --repo . --out docs/PROJECT_DOCS.md`, with no `--github-repo` flag, and the workflow file sets no `DOCSYNC_GITHUB_TOKEN` (`grep -n DOCSYNC .github/workflows/ci.yml` printed nothing). With no repository named and no token the tool is offline (FR-9, FR-10, EC-5, EC-14), which is why the CI gate is consistent with the committed offline artifact `docs/PROJECT_DOCS.md` (commit `27b00d1`).
 
-### 3.2 EL-1 and EL-2 log evidence (status: Open (pending log evidence))
+### 3.2 EL-1 and EL-2 evidence (status: CLOSED, human-supplied)
 
-The job logs are readable only with repository admin rights (HTTP 403 for the verifier). The human is asked to paste the exact lines. `pytest` runs verbosely in CI: `.github/workflows/ci.yml` line 35 is `run: python -m pytest -v --cov=src/docsync --cov-report=term-missing`, and `pyproject.toml` line 30 has `addopts = "-v --strict-markers"`, so each test prints a `PASSED` or `SKIPPED` line.
+Attribution: the CI figures below are observations the human read from the job log and supplied to the verifier. The verifier did not measure them (the logs endpoint returned 403) and has not viewed the screenshot the human says shows the per-test log line; the screenshot is corroborating evidence held by the human. `pytest` runs verbosely in CI (`.github/workflows/ci.yml` line 35 is `run: python -m pytest -v --cov=src/docsync --cov-report=term-missing`, and `pyproject.toml` line 30 has `addopts = "-v --strict-markers"`).
 
 | Item | Value |
 |---|---|
 | Run URL | https://github.com/paggybansal/agentic-sdlc-docsync/actions/runs/37918218702 |
 | Job | `test (ubuntu-latest / py3.12)` (https://github.com/paggybansal/agentic-sdlc-docsync/actions/runs/37918218702/job/113779510650), step `Test with coverage` |
-| Inference rule | `PASSED` on Linux closes the limitation. `SKIPPED` means it did not close and the limitation stands |
+| Commit | `c8489911bfd284d8b5b13f67433c442e87d89602` (`git rev-parse c848991`) |
+| Inference method | Pass/skip count differential: Linux py3.12 reported 456 passed and 0 skipped; the local Windows run reported 455 passed and 1 skipped. The one-test difference is the symlink test |
 
-| Limitation | Test | Exact log line | Status |
+| Limitation | Test | Evidence (human-supplied) | Status |
 |---|---|---|---|
-| EL-1 | `tests/test_collect.py::test_scan_modules_symlinked_directory_is_not_followed` | Pending - human to paste | Open (pending log evidence) |
-| EL-2 | `tests/test_integration.py::test_document_does_not_depend_on_file_creation_order` | Pending - human to paste | Open (pending log evidence) |
+| EL-1 | `tests/test_collect.py::test_scan_modules_symlinked_directory_is_not_followed` | 456 passed, 0 skipped on ubuntu-latest / py3.12 against 455 passed, 1 skipped on Windows local, so the symlink test executed and passed on Linux. The Windows skip is environmental: the manual attempt gave `OSError [WinError 1314] A required privilege is not held by the client`. Per-test log line: attached by the human as a screenshot (not viewed by the verifier) | CLOSED |
+| EL-2 | `tests/test_integration.py::test_document_does_not_depend_on_file_creation_order` | The full suite ran on ubuntu-latest with zero failures, so this test ran on ext4 (not NTFS) and passed. The NTFS caveat no longer limits the evidence | CLOSED |
 
+Residual weakness of the count-differential inference, recorded honestly while the status stays CLOSED as the human decided: the comparison is between different operating systems and Python versions (Linux 3.12 against Windows 3.14), so in principle another platform-dependent test could offset the symlink test in the counts. The collected total is 456 on both sides, and the only `skipif` in `tests/` is the symlink test (`grep -rn "skipif" tests` found it at `tests/test_collect.py:273`), which makes the inference reasonable. The EL-2 conclusion depends on the CI filesystem enumerating entries unsorted, which is typical of ext4 but was not itself measured.
 
 ## 4. Functional Verification Matrix
 
@@ -227,7 +265,7 @@ Chore note (no task id): the repository description, topics and an MIT LICENSE w
 
 ## 5. Output Document Quality Check
 
-Document checked: `docs/PROJECT_DOCS.md` (66 lines, generated by V-1).
+Document checked: `docs/PROJECT_DOCS.md` as generated by V-1 (66 lines). After the RO-2 deletion it was regenerated and now has 65 lines (`wc -l`), 45 table lines (re-measured with a Python count), SHA-256 `42f2fc700ad959c84e5adeb91d8ddf4299a200113dde0fdd639f43c41b4abced`, and 8 `Not Found` fields (unchanged); the other checks in this table were not re-run on the regenerated file, whose only change is one deleted module row.
 
 | Check | Expected | Actual | Result |
 |---|---|---|---|
@@ -237,7 +275,7 @@ Document checked: `docs/PROJECT_DOCS.md` (66 lines, generated by V-1).
 | No placeholder text | none of `TODO`, `TBD`, `lorem` (case-insensitive) | `grep -niE` printed nothing (exit 1) | Pass |
 | No `[REDACTED]` (V-9) | 0 | 0 | Pass |
 | Valid Markdown: headings | headings nest correctly | seven `##` headings, no skipped level, no `#` title (the architecture fixes the document as 7 sections) | Pass |
-| Valid Markdown: tables | every table well formed | 46 table lines, each with exactly 3 pipe characters (2 columns); each table has a header row and a `\|---\|---\|` separator | Pass |
+| Valid Markdown: tables | every table well formed | 46 table lines at V-1 (45 after the RO-2 regeneration), each with exactly 3 pipe characters (2 columns); each table has a header row and a `\|---\|---\|` separator | Pass |
 | Line endings and ending (FR-17) | LF only, exactly one trailing newline | `tail -c 16 docs/PROJECT_DOCS.md \| xxd` printed `00000000: 6120 5665 7273 696f 6e20 7c20 3120 7c0a  a Version \| 1 \|.` (one `0a`, preceded by `7c`, not `0a0a`); a Python check on the raw bytes printed `ends with single LF: True CR count 0` | Pass |
 | No timestamp or commit hash | none | `grep -ciE "[0-9]{4}-[0-9]{2}-[0-9]{2}\|\b[0-9a-f]{7,40}\b\|timestamp\|commit"` printed `0` | Pass |
 | Still in sync after the V-10 run | `check` exit 0 | `in sync`, exit 0; `docs/V10_TMP.md` was deleted (`ls` reported no such file) | Pass |
@@ -264,7 +302,7 @@ Verified by the full suite run in section 3 (455 passed, 1 skipped) and the matr
 | FR-19 | Tests; V-6 (exit 2, no traceback) | Pass |
 | NFR-1 | `tests/test_perf.py::test_offline_under_1s`: 0.0174 s (target 1.0 s, hard 2.0 s) | Pass |
 | NFR-2 | Offline figure kept: `tests/test_perf.py::test_offline_under_1s` best of 3 = 0.0174 s (target 1.0 s). Mocked timeout test passes; V-7b measured 2.583 s and V-7a 1.279 s for failed lookups only. Online figure: `Pending V-11` (to be replaced by the measured best duration). Corroborating side evidence only, not the product: `curl` to the public API returned HTTP 200 in 0.437647 s (V-10) | Partially verified (online pending V-11) |
-| NFR-3 | 98% total against 85% target | Pass |
+| NFR-3 | 98% total locally (re-measured after the RO-2 deletion) and 98% on Linux CI (human-supplied) against the 85% target | Pass |
 | NFR-4 | EC grep in section 3: every EC-1..EC-14 has at least one test name containing its id | Pass |
 | NFR-5 | `pip list` shows `requests` as the only runtime dependency of `docsync`; `pyproject.toml` runtime list in the generated document: `requests>=2.32.0` | Pass |
 | NFR-6 | `ruff check .`: `All checks passed!` | Pass |
@@ -298,22 +336,22 @@ No High-severity, security-false-negative or accepted-AC defect was found, so th
 | docs/PROJECT_DOCS.md, Hosted Repository Metadata | Full Name, Description, Default Branch, Visibility, License, Topics | Offline mode: no token and no `--github-repo` supplied, so no request is made (FR-9, EC-5, EC-14) |
 | NFR-2 | Online wall-clock time of a successful lookup | `Pending V-11`: not observable without a token (FR-9, EC-5; V-10 showed this); the human's manual authenticated run V-11 will supply the figure. Until then it is `Not Found` |
 | docs/04-impl-plan.md | Estimates of T20, T21, T22 | `Not Found` permanently by human decision (RO-7); step 8 discloses it as a process limitation |
-| EL-1, EL-2 | Per-test result of the symlink test and the directory-order test on Linux CI | `Pending - human to paste` (section 3.2); the logs returned HTTP 403 to the verifier. Status `Open (pending log evidence)` |
+| EL-1, EL-2 | Per-test result of the symlink test and the directory-order test on Linux CI | Closed by human-supplied CI evidence (section 3.2); no longer `Not Found` |
 
-### 8.2 Environment limitations (EL-1 to EL-3) and manual evidence (RO-9, RO-10)
+### 8.2 Environment limitations (EL-1 to EL-3; EL-1 and EL-2 closed) and manual evidence (RO-9, RO-10)
 
 EL-4 (line endings) is disclosed in section 1, as docs/04 section 10 requires, and is not repeated as a limitation.
 
 | ID | Limitation | Evidence from this step |
 |---|---|---|
-| EL-1 | Directory symlinks cannot be created on the development machine, so `test_scan_modules_symlinked_directory_is_not_followed` is skipped; "symlinked directories are not followed" is implemented but not exercised by a passing test here | Windows manual attempt: `OSError [WinError 1314] A required privilege is not held by the client` (the paths in the message are omitted here); the shell is not elevated, so the skip is environmental. Linux: both Ubuntu CI jobs passed pytest (section 3.1), but the symlink test's own line is not yet seen (logs HTTP 403). Status: Open (pending log evidence); see section 3.2 |
-| EL-2 | The directory-creation-order determinism test cannot fail on NTFS, which enumerates entries sorted | Status: Open (pending log evidence); the Ubuntu jobs passed, but the test's own result line is not yet seen (section 3.2). Ordering is covered directly by `test_scan_modules_output_sorted_by_code_point` |
+| EL-1 | CLOSED (human-supplied CI evidence). Directory symlinks cannot be created on the Windows development machine, so `test_scan_modules_symlinked_directory_is_not_followed` is skipped there | Windows manual attempt: `OSError [WinError 1314] A required privilege is not held by the client` (paths omitted); environmental. Linux: ubuntu-latest / py3.12 reported 456 passed, 0 skipped against 455 passed, 1 skipped locally, so the test executed and passed on Linux (section 3.2) |
+| EL-2 | CLOSED (human-supplied CI evidence). The directory-creation-order determinism test cannot fail on NTFS | The full suite ran on ubuntu-latest (ext4) with zero failures, so `test_document_does_not_depend_on_file_creation_order` ran and passed there (section 3.2). Ordering is also covered directly by `test_scan_modules_output_sorted_by_code_point` |
 | EL-3 | No automated test exercises the live GitHub API, by design (NFR-7) | V-7a and V-7b exercised failure paths manually; V-10 showed an unauthenticated online lookup is impossible (FR-9, EC-5); a successful online lookup was not observed; V-11 is the planned manual closure (section 4.1) |
 | RO-10 | Dependency floor | Only the installed dependency versions were audited: requests 2.34.2, urllib3 2.8.0, certifi 2026.7.22, idna 3.20, charset-normalizer 3.5.2 (plus pytest 9.1.1, pytest-cov 7.1.0, ruff 0.16.10 and their dependencies). The declared lower bound requests>=2.32.0 was not independently audited; a consumer resolving to the floor version is outside the verified configuration. The local editable package `docsync (0.1.0)` is out of scope for a vulnerability database lookup |
 
 ### 8.3 Deferred findings from docs/05-code-review.md (verbatim from sections 7.7.2, 7.10 and 7.11, CR-33 excluded per 7.7.3)
 
-Status for every row: Deferred, disclosed as Known Limitation. CR-42 is the highest id in docs/05-code-review.md plus one (the highest there is CR-41, checked with grep); it is recorded here only, and docs/05-code-review.md was NOT edited, because step 6 is closed, that review document is the code-reviewer's artifact, and the verifier's rule is to disclose and not remediate. The step 8 pull-request description must carry it, and the human may ask for a row in docs/05 later.
+Status for every row: Deferred, disclosed as Known Limitation. CR-9 update: the empty `collectors/` stub was removed in commit `bbc142c` (RO-2); the row below is reproduced verbatim as recorded, and the part about `CollectError` and `GitHubError` never being raised still stands. CR-42 is the highest id in docs/05-code-review.md plus one (the highest there is CR-41, checked with grep); it is recorded here only, and docs/05-code-review.md was NOT edited, because step 6 is closed, that review document is the code-reviewer's artifact, and the verifier's rule is to disclose and not remediate. The step 8 pull-request description must carry it, and the human may ask for a row in docs/05 later.
 
 | CR id | Severity | Finding (short) | Justification for deferral |
 |---|---|---|---|
@@ -343,6 +381,7 @@ Status for every row: Deferred, disclosed as Known Limitation. CR-42 is the high
 | CR-40 | Info | docs/04-impl-plan.md, T4 row: the T4 task description says the `key=value` rule applies to `key` among the strong words; the shipped bare-`key` rule needs a token-shaped value of 20 or more characters | Auto-deferred: Info, a historical task description superseded by T20 and T21a. docs/02-architecture.md section 7 (revision 1.4) states the current rules |
 | CR-41 | Info | docs/03-design-review.md, risk register: the risk example that `key=value` redaction "may over-redact benign text (for example `monkey=...`)" no longer happens: a bare `key` now needs a 20 or more character value | Auto-deferred: Info, a review-time risk example in a historical record; the document is not modified after step 3. The risk was accepted at step 3 and has since been reduced |
 | CR-42 | Minor | New, raised in step 7 (V-10): the CLI has no unauthenticated-online mode, so public repositories cannot be read without a token (FR-9 / EC-5 behaviour is token-gated). Disclosed as a future enhancement | Deferred under the remediation freeze and RO-11 (Minor, no accepted AC broken, no security effect); FR-9 and EC-5 require this behaviour, so it is a requirement trade-off and not a defect |
+| CR-43 | Minor | New, raised in step 7 (coverage review): `src/docsync/collect.py` branch `111->108`, the case in `_count_tests` where a top-level statement in a test file is neither a test function nor a class, is never executed by any test. No existing CR id names it: CR-8 and CR-10 name only lines 131-132 (the `OSError` branch when reading a test file), and those lines are already covered by those two ids, so they need no new id. Disclosed; step 8 PR must carry it | Deferred under the remediation freeze and RO-11 (Minor, no accepted AC broken, no security effect); the surrounding counting behaviour is exercised by other tests and an untested loop-continue branch does not change results. Recorded here only, not in docs/05-code-review.md |
 
 ### 8.4 Other limitations observed in this step
 
@@ -356,9 +395,9 @@ Status for every row: Deferred, disclosed as Known Limitation. CR-42 is the high
 
 **Pass with limitations.**
 
-This verdict is CONDITIONAL on the human recording V-11 (section 4.1) and the EL-1 and EL-2 log lines (section 3.2); until then those items read `Pending`. Basis: ruff 0 findings; the CI run on the same commit succeeded on all five jobs (section 3.1); 455 passed and 1 skipped (EL-1); coverage 98% against an 85% target; pip-audit clean for installed dependencies; V-1 to V-9 passed; the generated document passed all quality checks; no defects found (section 7). Limitations are those in section 8: the NFR-2 online figure for a successful lookup is `Not Found` (V-10: impossible unauthenticated by design), EL-1 to EL-3 are not closed by CI evidence (logs not readable), the declared dependency floor was not audited (RO-10), and the deferred redactor findings are disclosed.
+This verdict is CONDITIONAL only on V-11 being run and recorded by the human (section 4.1); EL-1 and EL-2 are closed (section 3.2). Basis: ruff 0 findings; the CI run on the same commit succeeded on all five jobs (section 3.1); 455 passed and 1 skipped locally and 456 passed, 0 skipped on Linux CI (human-supplied); coverage 98% against an 85% target; pip-audit clean for installed dependencies; V-1 to V-9 passed; the generated document passed all quality checks; no defects found (section 7). Limitations are those in section 8: the NFR-2 online figure for a successful lookup is `Pending V-11`, the declared dependency floor was not audited (RO-10), and the deferred findings are disclosed.
 
-Clean-tree statement: `LICENSE` was committed alone as `91fdad9` (`chore: add MIT LICENSE`) and `docs/PROJECT_DOCS.md` alone as `27b00d1` (`docs(step-7): track offline-rendered PROJECT_DOCS.md`, authorised by the human); `docs/06-verification.md` is created and uncommitted. The file modified for V-4 was restored (`cmp` printed `restored`; `check` returned `in sync`). `git status --short` shows only `docs/06-verification.md` plus the six pre-existing untracked files under `evidence/` (`step-00-gitlog.txt`, `step-00-tree.txt`, `step-01-gitlog.txt`, `step-02-architecture.txt`, `till_step5.txt`, `till_step6.txt`), which were left in place. No tracked file was modified (`git diff --stat` printed nothing). `src/` and `tests/` were not touched.
+Clean-tree statement: during step 7 these commits were made, each containing only its own files: `27b00d1` (`docs/PROJECT_DOCS.md`), `91fdad9` (`LICENSE`), `bbc142c` (deletion of `src/docsync/collectors/__init__.py`, authorised by the human as RO-2 completion), `0c334f2` (`docs/PROJECT_DOCS.md`); `9a84131` was committed by the human. The file modified for V-4 was restored (`cmp` printed `restored`; `check` returned `in sync`). `docs/06-verification.md` has uncommitted edits made after `9a84131`, and the six pre-existing files under `evidence/` (`step-00-gitlog.txt`, `step-00-tree.txt`, `step-01-gitlog.txt`, `step-02-architecture.txt`, `till_step5.txt`, `till_step6.txt`) remain untracked. Apart from the `src/docsync/collectors/` deletion, `src/` and `tests/` were not touched.
 
 ---
 **Gate:** Approve step 7 and continue? (yes / changes needed)

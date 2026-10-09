@@ -32,3 +32,5 @@ Thumbs.db
 .claude/sessions/
 .claude/projects/
 .claude/backups/
+# local step evidence transcripts
+evidence/
